@@ -1,0 +1,65 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { resetTestDB } from '../testUtils';
+import { createReport, getReport } from '../../lib/db/reports';
+import { addTimeEntry, deleteTimeEntry, listTimeEntries, updateTimeEntry } from '../../lib/db/timeEntries';
+
+beforeEach(async () => {
+  await resetTestDB();
+});
+
+describe('timeEntries repository', () => {
+  it('berechnet die Dauer automatisch aus Start-/Endzeit', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:30' });
+
+    expect(entry.durationMinutes).toBe(270);
+  });
+
+  it('übernimmt eine manuell gesetzte Dauer ohne Start/Ende', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', durationMinutes: 90 });
+
+    expect(entry.durationMinutes).toBe(90);
+  });
+
+  it('ignoriert eine ungültige Zeitspanne (Ende vor Start)', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '14:00', endTime: '09:00' });
+
+    expect(entry.durationMinutes).toBeUndefined();
+  });
+
+  it('aktualisiert die Dauer neu, wenn Start/Ende geändert werden', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+    expect(entry.durationMinutes).toBe(240);
+
+    const updated = await updateTimeEntry(entry.id, { endTime: '13:15' });
+    expect(updated?.durationMinutes).toBe(315);
+  });
+
+  it('aktualisiert Summary-Felder des Reports nach Hinzufügen/Löschen', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const first = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+
+    let updatedReport = await getReport(report.id);
+    expect(updatedReport?.timeEntryCount).toBe(2);
+    expect(updatedReport?.totalDurationMinutes).toBe(240 + 120);
+
+    await deleteTimeEntry(first.id);
+    updatedReport = await getReport(report.id);
+    expect(updatedReport?.timeEntryCount).toBe(1);
+    expect(updatedReport?.totalDurationMinutes).toBe(120);
+  });
+
+  it('listet Zeiteinträge sortiert nach Datum', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-12', startTime: '08:00', endTime: '10:00' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries.map((e) => e.date)).toEqual(['2026-08-10', '2026-08-11', '2026-08-12']);
+  });
+});
