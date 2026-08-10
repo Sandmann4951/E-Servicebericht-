@@ -10,7 +10,14 @@ import mkcert from 'vite-plugin-mkcert';
 // `npm run dev:iphone` angefordert (siehe package.json).
 const useMkcert = process.env.VITE_USE_MKCERT === '1';
 
+// Für ein GitHub-Pages-Projekt-Deployment liegt die App unter einem
+// Unterpfad (https://<user>.github.io/<repo>/), nicht an der Domain-Wurzel.
+// Der Deploy-Workflow setzt VITE_BASE_PATH entsprechend; lokal (npm run dev
+// /build) bleibt es bei "/".
+const basePath = process.env.VITE_BASE_PATH || '/';
+
 export default defineConfig(() => ({
+  base: basePath,
   plugins: [
     svelte(),
     useMkcert && mkcert(),
@@ -22,8 +29,8 @@ export default defineConfig(() => ({
         short_name: 'Servicebericht',
         description: 'Digitale Serviceberichte für Elektrohandwerk-Serviceeinsätze',
         lang: 'de',
-        start_url: '/',
-        scope: '/',
+        start_url: basePath,
+        scope: basePath,
         display: 'standalone',
         orientation: 'portrait',
         background_color: '#ffffff',
