@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDurationMinutes, formatDateDE, formatDurationMinutes } from '../../lib/utils/date';
+import { computeDurationMinutes, formatDateDE, formatDurationMinutes, nowHHmm, todayISODate } from '../../lib/utils/date';
 
 describe('computeDurationMinutes', () => {
   it('berechnet die Differenz in Minuten', () => {
@@ -30,5 +30,19 @@ describe('formatDurationMinutes', () => {
 describe('formatDateDE', () => {
   it('wandelt ISO-Datum in deutsches Format um', () => {
     expect(formatDateDE('2026-08-10')).toBe('10.08.2026');
+  });
+});
+
+describe('todayISODate', () => {
+  it('liefert das heutige Datum im lokalen "YYYY-MM-DD"-Format', () => {
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    expect(todayISODate()).toBe(expected);
+  });
+});
+
+describe('nowHHmm', () => {
+  it('liefert die aktuelle Uhrzeit im Format "HH:mm"', () => {
+    expect(nowHHmm()).toMatch(/^\d{2}:\d{2}$/);
   });
 });

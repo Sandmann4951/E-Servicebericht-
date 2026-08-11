@@ -35,6 +35,18 @@ export async function listTimeEntries(reportId: ID): Promise<TimeEntry[]> {
   return entries.sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 }
 
+/**
+ * Der aktuell "laufende" Zeiteintrag eines Berichts fürs Ein-/Ausstempeln -
+ * also ein Eintrag mit gesetzter Startzeit, aber noch ohne Endzeit. Es sollte
+ * normalerweise höchstens einen geben; falls doch mehrere existieren (z.B.
+ * durch manuelle Bearbeitung), wird der zuletzt begonnene zurückgegeben.
+ */
+export async function getActiveTimeEntry(reportId: ID): Promise<TimeEntry | undefined> {
+  const entries = await listTimeEntries(reportId);
+  const open = entries.filter((entry) => entry.startTime && !entry.endTime);
+  return open.at(-1);
+}
+
 export async function addTimeEntry(reportId: ID, input: TimeEntryInput): Promise<TimeEntry> {
   const db = await getDB();
   const now = new Date().toISOString();

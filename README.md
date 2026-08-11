@@ -4,11 +4,12 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 
 ## Funktionen (MVP)
 
-- **Projektnummer** je Servicebericht (Pflichtfeld), dazu optional Kunde, Techniker und Status (offen/abgeschlossen)
+- **Projektnummer** je Servicebericht (Pflichtfeld), dazu optional Kurzbeschreibung, Kunde, Ansprechpartner beim Kunden, Techniker und Status (offen/abgeschlossen)
+- **Ein-/Ausstempeln**: Ein Tap startet einen laufenden Zeiteintrag (Startzeit = jetzt), ein weiterer Tap beendet ihn (Endzeit = jetzt, Dauer wird automatisch berechnet). Der entstandene Zeiteintrag lässt sich wie jeder andere im Zeiten-Tab manuell nachbearbeiten
 - **Zeiten pro Tag** erfassen: Datum, Start-/Endzeit (Dauer wird automatisch berechnet), optionale Notiz
 - **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer – mit Autovervollständigung aus einem mitgelieferten Standard-Materialstamm für Elektroinstallation (`src/lib/materialCatalog.ts`) sowie bereits im Bericht verwendeten Bezeichnungen
 - **Fotos** des Einsatzes über Kamera oder Fotobibliothek hochladen, mit Vollbild-Ansicht
-- **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos) als editierbare Datei – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
+- **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten inkl. Kurzbeschreibung/Ansprechpartner, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos) als editierbare Datei mit farblichem Layout (Theme-Akzentfarbe, Tabellen-Header-Shading, Zebra-Streifen) – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
 - **Autosave** – kein Speichern-Button nötig, Eingaben werden automatisch gesichert
 - **Offlinefähig** – alle Daten liegen lokal auf dem Gerät (IndexedDB), keine Internetverbindung nötig
 - **Installierbar** – "Zum Home-Bildschirm hinzufügen" für App-artiges Verhalten auf iOS/Android

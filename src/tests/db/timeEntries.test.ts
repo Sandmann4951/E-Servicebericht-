@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport, getReport } from '../../lib/db/reports';
-import { addTimeEntry, deleteTimeEntry, listTimeEntries, updateTimeEntry } from '../../lib/db/timeEntries';
+import { addTimeEntry, deleteTimeEntry, getActiveTimeEntry, listTimeEntries, updateTimeEntry } from '../../lib/db/timeEntries';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -61,5 +61,36 @@ describe('timeEntries repository', () => {
 
     const entries = await listTimeEntries(report.id);
     expect(entries.map((e) => e.date)).toEqual(['2026-08-10', '2026-08-11', '2026-08-12']);
+  });
+});
+
+describe('getActiveTimeEntry (Ein-/Ausstempeln)', () => {
+  it('liefert undefined ohne laufenden Eintrag', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    expect(await getActiveTimeEntry(report.id)).toBeUndefined();
+  });
+
+  it('erkennt einen eingestempelten Eintrag ohne Endzeit als aktiv', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
+
+    const active = await getActiveTimeEntry(report.id);
+    expect(active?.id).toBe(entry.id);
+  });
+
+  it('ist nicht mehr aktiv, sobald ausgestempelt wurde', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
+    await updateTimeEntry(entry.id, { endTime: '16:00' });
+
+    expect(await getActiveTimeEntry(report.id)).toBeUndefined();
+  });
+
+  it('ignoriert bereits abgeschlossene Einträge anderer Tage', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-09', startTime: '08:00', endTime: '16:00' });
+    const active = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
+
+    expect((await getActiveTimeEntry(report.id))?.id).toBe(active.id);
   });
 });

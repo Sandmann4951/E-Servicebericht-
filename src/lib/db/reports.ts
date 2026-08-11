@@ -3,8 +3,11 @@ import type { ID, ReportStatus, ServiceReport } from './types';
 
 export interface CreateReportInput {
   projectNumber: string;
+  projectDescription?: string;
   customer?: string;
+  contactPerson?: string;
   technicianName?: string;
+  notes?: string;
 }
 
 export async function createReport(input: CreateReportInput): Promise<ServiceReport> {
@@ -13,10 +16,12 @@ export async function createReport(input: CreateReportInput): Promise<ServiceRep
   const report: ServiceReport = {
     id: crypto.randomUUID(),
     projectNumber: input.projectNumber.trim(),
+    projectDescription: input.projectDescription?.trim() || undefined,
     customer: input.customer?.trim() || undefined,
+    contactPerson: input.contactPerson?.trim() || undefined,
     technicianName: input.technicianName?.trim() || undefined,
     status: 'open',
-    notes: undefined,
+    notes: input.notes?.trim() || undefined,
     timeEntryCount: 0,
     totalDurationMinutes: 0,
     materialItemCount: 0,
@@ -43,7 +48,10 @@ export async function listReports(filter: ReportFilter = 'all'): Promise<Service
 }
 
 export type UpdateReportPatch = Partial<
-  Pick<ServiceReport, 'projectNumber' | 'customer' | 'technicianName' | 'status' | 'notes'>
+  Pick<
+    ServiceReport,
+    'projectNumber' | 'projectDescription' | 'customer' | 'contactPerson' | 'technicianName' | 'status' | 'notes'
+  >
 >;
 
 export async function updateReport(id: ID, patch: UpdateReportPatch): Promise<ServiceReport | undefined> {
@@ -52,7 +60,9 @@ export async function updateReport(id: ID, patch: UpdateReportPatch): Promise<Se
   if (!report) return undefined;
 
   if (patch.projectNumber !== undefined) report.projectNumber = patch.projectNumber.trim();
+  if (patch.projectDescription !== undefined) report.projectDescription = patch.projectDescription.trim() || undefined;
   if (patch.customer !== undefined) report.customer = patch.customer.trim() || undefined;
+  if (patch.contactPerson !== undefined) report.contactPerson = patch.contactPerson.trim() || undefined;
   if (patch.technicianName !== undefined) report.technicianName = patch.technicianName.trim() || undefined;
   if (patch.status !== undefined) report.status = patch.status;
   if (patch.notes !== undefined) report.notes = patch.notes.trim() || undefined;

@@ -9,7 +9,9 @@ function fakeReport(overrides: Partial<ServiceReport> = {}): ServiceReport {
   return {
     id: 'report-1',
     projectNumber: '2026-001',
+    projectDescription: 'Zählerschrank-Sanierung EG',
     customer: 'Musterfirma GmbH',
+    contactPerson: 'Frau Beispiel',
     technicianName: 'Daniel Sander',
     status: 'open',
     notes: 'Zählerschrank geprüft.\nKunde vor Ort informiert.',
@@ -85,6 +87,13 @@ describe('buildReportDocx', () => {
   it('funktioniert ohne Zeiten/Material/Fotos (leerer Bericht)', async () => {
     const blob = await buildReportDocx(
       fakeFullReport({ timeEntries: [], materialItems: [], photos: [], report: fakeReport({ notes: undefined }) })
+    );
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  it('funktioniert ohne Kurzbeschreibung/Ansprechpartner', async () => {
+    const blob = await buildReportDocx(
+      fakeFullReport({ report: fakeReport({ projectDescription: undefined, contactPerson: undefined }) })
     );
     expect(blob.size).toBeGreaterThan(0);
   });

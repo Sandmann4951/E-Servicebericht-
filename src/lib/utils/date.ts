@@ -1,8 +1,23 @@
 /** Kleine, abhängigkeitsfreie Datums-/Zeit-Helfer für die App. */
 
-/** Heutiges Datum als "YYYY-MM-DD" (für input[type=date]-Defaultwerte). */
+/**
+ * Heutiges Datum in der lokalen Zeitzone als "YYYY-MM-DD" (für
+ * input[type=date]-Defaultwerte und fürs Einstempeln). Bewusst NICHT über
+ * `toISOString()` (das liefert UTC) - sonst würde z.B. für jemanden in
+ * Deutschland kurz nach lokaler Mitternacht noch der Vortag zurückgegeben.
+ */
 export function todayISODate(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/** Aktuelle Uhrzeit (lokale Zeitzone) als "HH:mm" - fürs Ein-/Ausstempeln. */
+export function nowHHmm(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
 function parseTimeToMinutes(value: string): number | undefined {

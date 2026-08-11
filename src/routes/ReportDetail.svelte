@@ -4,6 +4,7 @@
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
   import { formatDurationMinutes } from '../lib/utils/date';
+  import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
   import MaterialSection from '../lib/components/MaterialSection.svelte';
   import PhotoSection from '../lib/components/PhotoSection.svelte';
@@ -20,7 +21,9 @@
   let notFound = $state(false);
 
   let projectNumber = $state('');
+  let projectDescription = $state('');
   let customer = $state('');
+  let contactPerson = $state('');
   let technicianName = $state('');
   let notes = $state('');
   let status = $state<ReportStatus>('open');
@@ -48,17 +51,30 @@
       if (!projectNumber.trim()) return;
       const created = await createReport({
         projectNumber,
+        projectDescription: projectDescription || undefined,
         customer: customer || undefined,
-        technicianName: technicianName || undefined
+        contactPerson: contactPerson || undefined,
+        technicianName: technicianName || undefined,
+        notes: notes || undefined
       });
       reportId = created.id;
-      navigate(`/reports/${created.id}`, { replace: true });
-      flashSaved();
-      return;
+      // Absichtlich noch KEIN navigate() hier: das würde über
+      // {#key route.id} in App.svelte sofort diese Komponente neu mounten
+      // und dabei gerade eingetippten, noch ungespeicherten Text in anderen
+      // Feldern verwerfen (der Nutzer tippt beim Anlegen oft mehrere Felder
+      // kurz hintereinander aus). Die URL wird stattdessen erst an
+      // unkritischen Stellen synchronisiert, siehe syncUrlToReportId().
     }
-    const updated = await updateReport(reportId, {
+    const id = reportId;
+    if (!id) return;
+    // Direkt nach dem Anlegen mit dem aktuellen Stand aktualisieren, statt
+    // hier aufzuhören - falls seit dem Lesen der Felder oben weitergetippt
+    // wurde, landet der neueste Stand so trotzdem sofort in der DB.
+    const updated = await updateReport(id, {
       projectNumber,
+      projectDescription: projectDescription || undefined,
       customer: customer || undefined,
+      contactPerson: contactPerson || undefined,
       technicianName: technicianName || undefined,
       notes: notes || undefined,
       status
@@ -66,8 +82,22 @@
     if (updated) flashSaved();
   }
 
+  // persistNow() liest reaktiven State und macht dann einen Lesen-Ändern-
+  // Schreiben-Zyklus auf der DB. Bei schnell aufeinanderfolgenden Aufrufen
+  // (z.B. onblur={flushNow} beim Wechsel zwischen mehreren Feldern kurz
+  // hintereinander) dürfen diese Zyklen NIE parallel laufen - sonst kann ein
+  // später gestarteter, aber früher abgeschlossener Aufruf einen bereits
+  // gespeicherten Feldwert wieder überschreiben. saveChain serialisiert alle
+  // Aufrufe strikt in Aufrufreihenfolge.
+  let saveChain: Promise<void> = Promise.resolve();
+
+  function queueSave(): Promise<void> {
+    saveChain = saveChain.then(persistNow).catch((err) => console.error('Speichern fehlgeschlagen', err));
+    return saveChain;
+  }
+
   const scheduledSave = debounce(() => {
-    void persistNow();
+    queueSave();
   }, 450);
 
   function onFieldChange(): void {
@@ -77,6 +107,20 @@
 
   function flushNow(): void {
     scheduledSave.flush();
+  }
+
+  /**
+   * Trägt die URL von "/reports/new" auf die inzwischen vergebene reportId
+   * nach - wichtig für Reload/Zurück-Button, aber bewusst NICHT direkt nach
+   * dem Anlegen aufgerufen (siehe persistNow()). Nur an Stellen aufrufen, an
+   * denen der Nutzer gerade nicht mitten im Tippen ist (Tab-Wechsel,
+   * Hintergrund/Verlassen der Seite) - der {#key route.id}-Remount, den das
+   * auslöst, ist an diesen Punkten unkritisch.
+   */
+  function syncUrlToReportId(): void {
+    if (reportId && isNewRoute) {
+      navigate(`/reports/${reportId}`, { replace: true });
+    }
   }
 
   $effect(() => {
@@ -92,7 +136,9 @@
       }
       reportId = report.id;
       projectNumber = report.projectNumber;
+      projectDescription = report.projectDescription ?? '';
       customer = report.customer ?? '';
+      contactPerson = report.contactPerson ?? '';
       technicianName = report.technicianName ?? '';
       notes = report.notes ?? '';
       status = report.status;
@@ -109,7 +155,10 @@
 
   $effect(() => {
     function handleVisibilityChange(): void {
-      if (document.visibilityState === 'hidden') flushNow();
+      if (document.visibilityState === 'hidden') {
+        flushNow();
+        syncUrlToReportId();
+      }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pagehide', flushNow);
@@ -133,7 +182,7 @@
   async function toggleStatus(): Promise<void> {
     status = status === 'open' ? 'completed' : 'open';
     flushNow();
-    await persistNow();
+    await saveChain;
   }
 
   async function removeReport(): Promise<void> {
@@ -258,8 +307,30 @@
         {/if}
 
         <label>
+          Kurzbeschreibung
+          <input
+            type="text"
+            bind:value={projectDescription}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="z.B. Zählerschrank-Sanierung EG"
+          />
+        </label>
+
+        <label>
           Kunde
-          <input type="text" bind:value={customer} oninput={onFieldChange} onblur={flushNow} placeholder="Firma / Ansprechpartner" />
+          <input type="text" bind:value={customer} oninput={onFieldChange} onblur={flushNow} placeholder="Firma" />
+        </label>
+
+        <label>
+          Ansprechpartner (Kunde)
+          <input
+            type="text"
+            bind:value={contactPerson}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="Name des Ansprechpartners vor Ort"
+          />
         </label>
 
         <label>
@@ -290,6 +361,9 @@
       <div class="tab-content">
         {#if activeTab === 'übersicht'}
           <div class="overview">
+            {#if reportId}
+              <TimeClock {reportId} onChanged={refreshSummary} />
+            {/if}
             <div class="stats">
               <div class="stat"><strong>{timeEntryCount}</strong><span>Tage</span></div>
               <div class="stat"><strong>{formatDurationMinutes(totalDurationMinutes)}</strong><span>Zeit gesamt</span></div>

@@ -16,7 +16,9 @@ export type ReportStatus = 'open' | 'completed';
 export interface ServiceReport {
   id: ID;
   projectNumber: string;
+  projectDescription?: string;
   customer?: string;
+  contactPerson?: string;
   technicianName?: string;
   status: ReportStatus;
   notes?: string;

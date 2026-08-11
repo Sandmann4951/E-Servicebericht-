@@ -19,6 +19,21 @@ describe('reports repository', () => {
     expect(report.photoCount).toBe(0);
   });
 
+  it('speichert Kurzbeschreibung, Ansprechpartner und Notizen bereits beim Anlegen', async () => {
+    const report = await createReport({
+      projectNumber: '2026-002',
+      projectDescription: 'Zählerschrank-Sanierung',
+      customer: 'Musterfirma GmbH',
+      contactPerson: 'Frau Beispiel',
+      technicianName: 'Daniel',
+      notes: 'Erstbegehung erfolgt'
+    });
+
+    expect(report.projectDescription).toBe('Zählerschrank-Sanierung');
+    expect(report.contactPerson).toBe('Frau Beispiel');
+    expect(report.notes).toBe('Erstbegehung erfolgt');
+  });
+
   it('listet Berichte nach updatedAt absteigend', async () => {
     const first = await createReport({ projectNumber: 'A' });
     await new Promise((resolve) => setTimeout(resolve, 2));
