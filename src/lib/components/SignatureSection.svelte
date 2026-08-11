@@ -125,7 +125,12 @@
   }
 
   async function removeSignature(): Promise<void> {
-    if (!confirm('Unterschrift wirklich entfernen?')) return;
+    if (
+      !confirm(
+        'Unterschrift wirklich entfernen? Der Bericht wird dadurch wieder bearbeitbar – eine neue Unterschrift muss danach erneut eingeholt werden.'
+      )
+    )
+      return;
     await onClear();
   }
 </script>

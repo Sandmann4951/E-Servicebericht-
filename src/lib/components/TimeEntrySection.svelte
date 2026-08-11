@@ -4,7 +4,7 @@
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
 
-  let { reportId, onChanged }: { reportId: string; onChanged: () => void } = $props();
+  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
   let entries = $state<TimeEntry[]>([]);
   let loading = $state(true);
@@ -127,22 +127,35 @@
       <ul class="list">
         {#each entries as entry (entry.id)}
           <li class="row">
-            <button type="button" class="row-main" onclick={() => startEdit(entry)}>
-              <span class="date">{formatDateDE(entry.date)}</span>
-              <span class="meta">
-                {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
-                {formatDurationMinutes(entry.durationMinutes)}
-              </span>
-              {#if entry.note}<span class="note">{entry.note}</span>{/if}
-            </button>
-            <button type="button" class="delete" aria-label="Zeiteintrag löschen" onclick={() => remove(entry)}>🗑</button>
+            {#if locked}
+              <div class="row-main">
+                <span class="date">{formatDateDE(entry.date)}</span>
+                <span class="meta">
+                  {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
+                  {formatDurationMinutes(entry.durationMinutes)}
+                </span>
+                {#if entry.note}<span class="note">{entry.note}</span>{/if}
+              </div>
+            {:else}
+              <button type="button" class="row-main" onclick={() => startEdit(entry)}>
+                <span class="date">{formatDateDE(entry.date)}</span>
+                <span class="meta">
+                  {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
+                  {formatDurationMinutes(entry.durationMinutes)}
+                </span>
+                {#if entry.note}<span class="note">{entry.note}</span>{/if}
+              </button>
+              <button type="button" class="delete" aria-label="Zeiteintrag löschen" onclick={() => remove(entry)}>🗑</button>
+            {/if}
           </li>
         {/each}
       </ul>
     {/if}
   {/if}
 
-  {#if showForm}
+  {#if locked}
+    <p class="hint">Bericht ist gesperrt – Zeiten können nicht mehr geändert werden.</p>
+  {:else if showForm}
     <form
       class="form"
       onsubmit={(event) => {

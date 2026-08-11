@@ -1,9 +1,10 @@
 <script lang="ts">
   import { clearReportSignature, createReport, deleteReport, getReport, setReportSignature, updateReport } from '../lib/db/reports';
+  import { getActiveTimeEntry, updateTimeEntry } from '../lib/db/timeEntries';
   import type { ReportStatus } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
-  import { formatDurationMinutes } from '../lib/utils/date';
+  import { formatDurationMinutes, nowHHmm } from '../lib/utils/date';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
   import MaterialSection from '../lib/components/MaterialSection.svelte';
@@ -37,6 +38,12 @@
   let signatureBlob = $state<Blob | undefined>(undefined);
   let signedByName = $state<string | undefined>(undefined);
   let signedAt = $state<string | undefined>(undefined);
+
+  // Ein unterschriebener Bericht gilt als abgeschlossen und darf nicht mehr
+  // verändert werden - die Sperre hängt bewusst direkt an signedAt statt an
+  // einem eigenen Flag, damit sie nie aus dem Tritt geraten kann. Einziger
+  // Weg zurück: die Unterschrift über SignatureSection wieder entfernen.
+  const locked = $derived(!!signedAt);
 
   let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos' | 'unterschrift'>('übersicht');
   let savedPulseVisible = $state(false);
@@ -195,6 +202,18 @@
     signedByName = updated.signedByName;
     signedAt = updated.signedAt;
     flashSaved();
+
+    // Unterschreiben sperrt den Bericht (siehe `locked`). Eine noch laufende
+    // Stempeluhr in diesem Bericht wird dabei automatisch beendet - sonst
+    // bliebe sie offen, ohne dass sie nach der Sperre noch jemand ausstempeln
+    // könnte. Der Status springt konsequent auf "Abgeschlossen".
+    const activeEntry = await getActiveTimeEntry(reportId);
+    if (activeEntry) {
+      await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
+      await refreshSummary();
+    }
+    if (status !== 'completed') status = 'completed';
+    await queueSave();
   }
 
   async function clearSignature(): Promise<void> {
@@ -321,6 +340,12 @@
     </div>
   {:else}
     <div class="content">
+      {#if locked}
+        <p class="locked-banner">
+          🔒 Unterschrieben am {signedAt ? new Date(signedAt).toLocaleString('de-DE') : ''}{signedByName ? ` von ${signedByName}` : ''}
+          – der Bericht ist gesperrt. Um Änderungen vorzunehmen, muss die Unterschrift im Tab "Unterschrift" zuerst entfernt werden.
+        </p>
+      {/if}
       <div class="fields">
         <label class:invalid={projectNumberMissing}>
           Projektnummer *
@@ -331,6 +356,7 @@
             onblur={flushNow}
             placeholder="z.B. 2026-0142"
             required
+            disabled={locked}
           />
         </label>
         {#if projectNumberMissing}
@@ -345,12 +371,20 @@
             oninput={onFieldChange}
             onblur={flushNow}
             placeholder="z.B. Zählerschrank-Sanierung EG"
+            disabled={locked}
           />
         </label>
 
         <label>
           Kunde
-          <input type="text" bind:value={customer} oninput={onFieldChange} onblur={flushNow} placeholder="Firma" />
+          <input
+            type="text"
+            bind:value={customer}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="Firma"
+            disabled={locked}
+          />
         </label>
 
         <label>
@@ -361,15 +395,29 @@
             oninput={onFieldChange}
             onblur={flushNow}
             placeholder="Name des Ansprechpartners vor Ort"
+            disabled={locked}
           />
         </label>
 
         <label>
           Techniker
-          <input type="text" bind:value={technicianName} oninput={onFieldChange} onblur={flushNow} placeholder="Dein Name" />
+          <input
+            type="text"
+            bind:value={technicianName}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="Dein Name"
+            disabled={locked}
+          />
         </label>
 
-        <button type="button" class="status-toggle" class:completed={status === 'completed'} onclick={toggleStatus}>
+        <button
+          type="button"
+          class="status-toggle"
+          class:completed={status === 'completed'}
+          onclick={toggleStatus}
+          disabled={locked}
+        >
           {status === 'open' ? '● Offen' : '✓ Abgeschlossen'}
         </button>
       </div>
@@ -400,7 +448,7 @@
         {#if activeTab === 'übersicht'}
           <div class="overview">
             {#if reportId}
-              <TimeClock {reportId} onChanged={refreshSummary} />
+              <TimeClock {reportId} {locked} onChanged={refreshSummary} />
             {/if}
             <div class="stats">
               <div class="stat"><strong>{timeEntryCount}</strong><span>Tage</span></div>
@@ -416,15 +464,16 @@
                 oninput={onFieldChange}
                 onblur={flushNow}
                 placeholder="Allgemeine Notizen zum Einsatz…"
+                disabled={locked}
               ></textarea>
             </label>
           </div>
         {:else if activeTab === 'zeiten' && reportId}
-          <TimeEntrySection {reportId} onChanged={refreshSummary} />
+          <TimeEntrySection {reportId} {locked} onChanged={refreshSummary} />
         {:else if activeTab === 'material' && reportId}
-          <MaterialSection {reportId} onChanged={refreshSummary} />
+          <MaterialSection {reportId} {locked} onChanged={refreshSummary} />
         {:else if activeTab === 'fotos' && reportId}
-          <PhotoSection {reportId} onChanged={refreshSummary} />
+          <PhotoSection {reportId} {locked} onChanged={refreshSummary} />
         {:else if activeTab === 'unterschrift' && reportId}
           <SignatureSection
             {signatureBlob}
@@ -519,11 +568,31 @@
     overflow-y: auto;
   }
 
+  .locked-banner {
+    margin: var(--space-4) var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-open-bg);
+    color: var(--color-open);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
   .fields {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
     padding: var(--space-4);
+  }
+
+  .fields input:disabled,
+  .overview textarea:disabled {
+    opacity: 0.7;
+  }
+
+  .status-toggle:disabled {
+    opacity: 0.7;
   }
 
   .fields label {

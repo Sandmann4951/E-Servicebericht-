@@ -4,7 +4,7 @@
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm, todayISODate } from '../utils/date';
 
-  let { reportId, onChanged }: { reportId: string; onChanged: () => void } = $props();
+  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
   let activeEntry = $state<TimeEntry | undefined>(undefined);
   let loading = $state(true);
@@ -39,7 +39,7 @@
   });
 
   async function clockIn(): Promise<void> {
-    if (busy || activeEntry) return;
+    if (busy || activeEntry || locked) return;
     busy = true;
     try {
       // Man kann immer nur in EINEM Bericht gleichzeitig eingestempelt sein.
@@ -63,7 +63,7 @@
   }
 
   async function clockOut(): Promise<void> {
-    if (busy || !activeEntry) return;
+    if (busy || !activeEntry || locked) return;
     busy = true;
     try {
       await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
@@ -85,7 +85,11 @@
           {#if elapsedMinutes !== undefined}· {formatDurationMinutes(elapsedMinutes)}{/if}
         </span>
       </div>
-      <button type="button" class="clock-out" onclick={clockOut} disabled={busy}>⏹ Ausstempeln</button>
+      {#if !locked}
+        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}>⏹ Ausstempeln</button>
+      {/if}
+    {:else if locked}
+      <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>
     {:else}
       <button type="button" class="clock-in" onclick={clockIn} disabled={busy}>▶️ Einstempeln</button>
     {/if}
@@ -121,6 +125,13 @@
   .clock-in:disabled,
   .clock-out:disabled {
     opacity: 0.6;
+  }
+
+  .locked-hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+    text-align: center;
   }
 
   .active-badge {

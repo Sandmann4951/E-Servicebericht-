@@ -3,7 +3,7 @@
   import type { MaterialItem } from '../db/types';
   import { STANDARD_MATERIALS } from '../materialCatalog';
 
-  let { reportId, onChanged }: { reportId: string; onChanged: () => void } = $props();
+  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
   const commonUnits = ['Stk', 'm', 'Set', 'Std', 'kg', 'lfm', 'Pkg'];
   const unitByDescription = new Map(STANDARD_MATERIALS.map((entry) => [entry.description, entry.unit]));
@@ -107,20 +107,31 @@
       <ul class="list">
         {#each items as item (item.id)}
           <li class="row">
-            <button type="button" class="row-main" onclick={() => startEdit(item)}>
-              <span class="desc">{item.description}</span>
-              <span class="meta">
-                {item.quantity} {item.unit}{item.articleNumber ? ` · Art.-Nr. ${item.articleNumber}` : ''}
-              </span>
-            </button>
-            <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>🗑</button>
+            {#if locked}
+              <div class="row-main">
+                <span class="desc">{item.description}</span>
+                <span class="meta">
+                  {item.quantity} {item.unit}{item.articleNumber ? ` · Art.-Nr. ${item.articleNumber}` : ''}
+                </span>
+              </div>
+            {:else}
+              <button type="button" class="row-main" onclick={() => startEdit(item)}>
+                <span class="desc">{item.description}</span>
+                <span class="meta">
+                  {item.quantity} {item.unit}{item.articleNumber ? ` · Art.-Nr. ${item.articleNumber}` : ''}
+                </span>
+              </button>
+              <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>🗑</button>
+            {/if}
           </li>
         {/each}
       </ul>
     {/if}
   {/if}
 
-  {#if showForm}
+  {#if locked}
+    <p class="hint">Bericht ist gesperrt – Material kann nicht mehr geändert werden.</p>
+  {:else if showForm}
     <form
       class="form"
       onsubmit={(event) => {

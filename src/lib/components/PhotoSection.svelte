@@ -3,7 +3,7 @@
   import type { Photo } from '../db/types';
   import { createThumbnail } from '../utils/image';
 
-  let { reportId, onChanged }: { reportId: string; onChanged: () => void } = $props();
+  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
   let photos = $state<Photo[]>([]);
   let loading = $state(true);
@@ -99,7 +99,7 @@
   }
 
   async function removeCurrent(): Promise<void> {
-    if (!viewerPhoto) return;
+    if (!viewerPhoto || locked) return;
     if (!confirm('Dieses Foto endgültig löschen?')) return;
     const id = viewerPhoto.id;
     closeViewer();
@@ -110,10 +110,14 @@
 </script>
 
 <div class="section">
-  <div class="upload-buttons">
-    <button type="button" onclick={() => cameraInput?.click()} disabled={uploading}>📷 Kamera</button>
-    <button type="button" onclick={() => libraryInput?.click()} disabled={uploading}>🖼️ Bibliothek</button>
-  </div>
+  {#if locked}
+    <p class="hint">Bericht ist gesperrt – Fotos können nicht mehr geändert werden.</p>
+  {:else}
+    <div class="upload-buttons">
+      <button type="button" onclick={() => cameraInput?.click()} disabled={uploading}>📷 Kamera</button>
+      <button type="button" onclick={() => libraryInput?.click()} disabled={uploading}>🖼️ Bibliothek</button>
+    </div>
+  {/if}
 
   <input
     bind:this={cameraInput}
@@ -160,7 +164,9 @@
   <div class="viewer" role="dialog" aria-modal="true">
     <img src={viewerUrl} alt="Einsatzfoto in Vollansicht" />
     <div class="viewer-actions">
-      <button type="button" class="delete" onclick={removeCurrent}>🗑 Löschen</button>
+      {#if !locked}
+        <button type="button" class="delete" onclick={removeCurrent}>🗑 Löschen</button>
+      {/if}
       <button type="button" class="close" onclick={closeViewer}>Schließen</button>
     </div>
   </div>
