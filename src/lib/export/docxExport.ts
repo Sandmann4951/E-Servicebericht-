@@ -185,6 +185,34 @@ async function buildPhotosSection(data: FullReport): Promise<(Paragraph | Table)
   return children;
 }
 
+/** Breite der eingebetteten Unterschrift, in Pixeln - Unterschriften sind i.d.R. eher schmal/quer. */
+const SIGNATURE_MAX_WIDTH_PX = 320;
+
+async function buildSignatureSection(data: FullReport): Promise<(Paragraph | Table)[]> {
+  const { signatureBlob, signatureWidth, signatureHeight, signedByName, signedAt } = data.report;
+  if (!signatureBlob) return [];
+
+  const buffer = await signatureBlob.arrayBuffer();
+  const width = signatureWidth && signatureHeight ? Math.min(SIGNATURE_MAX_WIDTH_PX, signatureWidth) : SIGNATURE_MAX_WIDTH_PX;
+  const height =
+    signatureWidth && signatureHeight
+      ? Math.round((width / signatureWidth) * signatureHeight)
+      : Math.round(width * 0.4);
+
+  const caption = [signedByName ? `Unterschrieben von ${signedByName}` : 'Unterschrieben', signedAt ? `am ${formatDateTimeDE(signedAt)}` : '']
+    .filter(Boolean)
+    .join(' ');
+
+  return [
+    heading('Unterschrift'),
+    new Paragraph({
+      children: [new ImageRun({ type: 'png', data: buffer, transformation: { width, height } })],
+      spacing: { before: 120 }
+    }),
+    new Paragraph({ children: [new TextRun({ text: caption, color: TEXT_MUTED, size: 18 })], spacing: { after: 160 } })
+  ];
+}
+
 /** Baut ein editierbares Word-Dokument aus einem vollständigen Bericht. Rein clientseitig, keine DB-/DOM-Zugriffe. */
 export async function buildReportDocx(data: FullReport): Promise<Blob> {
   const children: (Paragraph | Table)[] = [
@@ -192,7 +220,8 @@ export async function buildReportDocx(data: FullReport): Promise<Blob> {
     ...buildTimeEntriesSection(data),
     ...buildMaterialSection(data),
     ...buildNotesSection(data),
-    ...(await buildPhotosSection(data))
+    ...(await buildPhotosSection(data)),
+    ...(await buildSignatureSection(data))
   ];
 
   const doc = new Document({

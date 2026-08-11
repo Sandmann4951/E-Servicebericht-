@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
-import { createReport, deleteReport, getReport, listReports, updateReport } from '../../lib/db/reports';
+import {
+  clearReportSignature,
+  createReport,
+  deleteReport,
+  getReport,
+  listReports,
+  setReportSignature,
+  updateReport
+} from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
 
 beforeEach(async () => {
@@ -97,5 +105,47 @@ describe('reports repository', () => {
     expect(final?.status).toBe('open');
     expect(final?.timeEntryCount).toBe(1);
     expect(final?.totalDurationMinutes).toBe(120);
+  });
+
+  it('speichert eine Kunden-Unterschrift', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
+
+    const updated = await setReportSignature(report.id, { blob, width: 300, height: 120, signedByName: 'Herr Kunde' });
+
+    expect(updated?.signatureBlob).toBe(blob);
+    expect(updated?.signatureWidth).toBe(300);
+    expect(updated?.signatureHeight).toBe(120);
+    expect(updated?.signedByName).toBe('Herr Kunde');
+    expect(updated?.signedAt).toBeTruthy();
+
+    // fake-indexeddb klont Blobs beim Schreiben/Lesen (structured clone) - nach
+    // dem erneuten Laden ist es also eine neue Instanz mit gleichem Inhalt.
+    const reloaded = await getReport(report.id);
+    expect(reloaded?.signatureBlob).toStrictEqual(blob);
+    expect(reloaded?.signedByName).toBe('Herr Kunde');
+  });
+
+  it('entfernt eine gespeicherte Kunden-Unterschrift wieder', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
+    await setReportSignature(report.id, { blob, width: 300, height: 120, signedByName: 'Herr Kunde' });
+
+    const cleared = await clearReportSignature(report.id);
+
+    expect(cleared?.signatureBlob).toBeUndefined();
+    expect(cleared?.signatureWidth).toBeUndefined();
+    expect(cleared?.signatureHeight).toBeUndefined();
+    expect(cleared?.signedByName).toBeUndefined();
+    expect(cleared?.signedAt).toBeUndefined();
+
+    const reloaded = await getReport(report.id);
+    expect(reloaded?.signatureBlob).toBeUndefined();
+  });
+
+  it('liefert undefined bei setReportSignature/clearReportSignature für nicht existierenden Bericht', async () => {
+    const blob = new Blob([new Uint8Array([1])], { type: 'image/png' });
+    expect(await setReportSignature('does-not-exist', { blob, width: 10, height: 10 })).toBeUndefined();
+    expect(await clearReportSignature('does-not-exist')).toBeUndefined();
   });
 });

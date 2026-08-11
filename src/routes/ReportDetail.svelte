@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createReport, deleteReport, getReport, updateReport } from '../lib/db/reports';
+  import { clearReportSignature, createReport, deleteReport, getReport, setReportSignature, updateReport } from '../lib/db/reports';
   import type { ReportStatus } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
@@ -8,6 +8,7 @@
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
   import MaterialSection from '../lib/components/MaterialSection.svelte';
   import PhotoSection from '../lib/components/PhotoSection.svelte';
+  import SignatureSection from '../lib/components/SignatureSection.svelte';
 
   let { id }: { id: string } = $props();
 
@@ -33,7 +34,11 @@
   let materialItemCount = $state(0);
   let photoCount = $state(0);
 
-  let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos'>('übersicht');
+  let signatureBlob = $state<Blob | undefined>(undefined);
+  let signedByName = $state<string | undefined>(undefined);
+  let signedAt = $state<string | undefined>(undefined);
+
+  let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos' | 'unterschrift'>('übersicht');
   let savedPulseVisible = $state(false);
   let savedPulseTimeout: ReturnType<typeof setTimeout> | undefined;
   let projectNumberMissing = $state(false);
@@ -146,6 +151,9 @@
       totalDurationMinutes = report.totalDurationMinutes;
       materialItemCount = report.materialItemCount;
       photoCount = report.photoCount;
+      signatureBlob = report.signatureBlob;
+      signedByName = report.signedByName;
+      signedAt = report.signedAt;
       loading = false;
     });
     return () => {
@@ -177,6 +185,26 @@
     totalDurationMinutes = report.totalDurationMinutes;
     materialItemCount = report.materialItemCount;
     photoCount = report.photoCount;
+  }
+
+  async function saveSignature(blob: Blob, name: string, width: number, height: number): Promise<void> {
+    if (!reportId) return;
+    const updated = await setReportSignature(reportId, { blob, signedByName: name, width, height });
+    if (!updated) return;
+    signatureBlob = updated.signatureBlob;
+    signedByName = updated.signedByName;
+    signedAt = updated.signedAt;
+    flashSaved();
+  }
+
+  async function clearSignature(): Promise<void> {
+    if (!reportId) return;
+    const updated = await clearReportSignature(reportId);
+    if (!updated) return;
+    signatureBlob = updated.signatureBlob;
+    signedByName = updated.signedByName;
+    signedAt = updated.signedAt;
+    flashSaved();
   }
 
   async function toggleStatus(): Promise<void> {
@@ -251,7 +279,7 @@
     navigate('/');
   }
 
-  function openSectionTab(tab: 'zeiten' | 'material' | 'fotos'): void {
+  function openSectionTab(tab: 'zeiten' | 'material' | 'fotos' | 'unterschrift'): void {
     if (!reportId) {
       projectNumberMissing = true;
       return;
@@ -359,6 +387,13 @@
         <button type="button" class:active={activeTab === 'fotos'} onclick={() => openSectionTab('fotos')}>
           Fotos
         </button>
+        <button
+          type="button"
+          class:active={activeTab === 'unterschrift'}
+          onclick={() => openSectionTab('unterschrift')}
+        >
+          Unterschrift
+        </button>
       </div>
 
       <div class="tab-content">
@@ -390,6 +425,15 @@
           <MaterialSection {reportId} onChanged={refreshSummary} />
         {:else if activeTab === 'fotos' && reportId}
           <PhotoSection {reportId} onChanged={refreshSummary} />
+        {:else if activeTab === 'unterschrift' && reportId}
+          <SignatureSection
+            {signatureBlob}
+            {signedByName}
+            {signedAt}
+            defaultName={contactPerson}
+            onSave={saveSignature}
+            onClear={clearSignature}
+          />
         {/if}
       </div>
     </div>

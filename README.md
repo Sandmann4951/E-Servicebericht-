@@ -9,13 +9,14 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 - **Zeiten pro Tag** erfassen: Datum, Start-/Endzeit (Dauer wird automatisch berechnet), optionale Notiz. Beim Speichern wird berichtsübergreifend auf Überschneidungen mit anderen Zeiteinträgen am selben Tag geprüft (man kann ja nicht gleichzeitig an zwei Orten arbeiten) – bei einer Überschneidung wird nachgefragt, ob wirklich so gespeichert werden soll, und optional angeboten, die überschneidenden Einträge gleich zu entfernen
 - **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer – mit Autovervollständigung aus einem mitgelieferten Standard-Materialstamm für Elektroinstallation (`src/lib/materialCatalog.ts`) sowie bereits im Bericht verwendeten Bezeichnungen
 - **Fotos** des Einsatzes über Kamera oder Fotobibliothek hochladen, mit Vollbild-Ansicht
-- **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten inkl. Kurzbeschreibung/Ansprechpartner, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos) als editierbare Datei mit farblichem Layout (Theme-Akzentfarbe, Tabellen-Header-Shading, Zebra-Streifen) – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
+- **Kunden-Unterschrift**: Im Tab "Unterschrift" kann der Kunde vor Ort mit dem Finger oder der Maus auf einem Unterschriften-Pad unterzeichnen (samt Name); die Unterschrift wird im Bericht gespeichert, lässt sich jederzeit neu erfassen oder entfernen und erscheint im Word-Export als eigener Abschnitt am Ende des Dokuments
+- **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten inkl. Kurzbeschreibung/Ansprechpartner, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos, Kunden-Unterschrift) als editierbare Datei mit farblichem Layout (Theme-Akzentfarbe, Tabellen-Header-Shading, Zebra-Streifen) – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
 - **Backup & Wiederherstellung**: Der komplette Datenbestand (alle Berichte, Zeiten, Material, Fotos) lässt sich in der Berichtsliste oben als eine JSON-Datei sichern (💾) und auf einem anderen Gerät/nach Datenverlust wieder einspielen (📥) – wichtig, da alle Daten sonst ausschließlich lokal auf einem Gerät liegen. Vor dem Import wird eine Zusammenfassung angezeigt und um Bestätigung gebeten; vorhandene Berichte mit gleicher ID werden dabei überschrieben
 - **Autosave** – kein Speichern-Button nötig, Eingaben werden automatisch gesichert
 - **Offlinefähig** – alle Daten liegen lokal auf dem Gerät (IndexedDB), keine Internetverbindung nötig
 - **Installierbar** – "Zum Home-Bildschirm hinzufügen" für App-artiges Verhalten auf iOS/Android
 
-Aktuell bewusst außerhalb des Umfangs: Kunden-Unterschrift im Bericht, PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
+Aktuell bewusst außerhalb des Umfangs: PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
 
 ## Tech-Stack
 

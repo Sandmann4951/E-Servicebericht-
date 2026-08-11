@@ -104,6 +104,26 @@ describe('buildReportDocx', () => {
     );
     expect(blob.size).toBeGreaterThan(0);
   });
+
+  it('bettet eine vorhandene Kunden-Unterschrift ein', async () => {
+    const blob = await buildReportDocx(
+      fakeFullReport({
+        report: fakeReport({
+          signatureBlob: new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' }),
+          signatureWidth: 400,
+          signatureHeight: 150,
+          signedByName: 'Herr Kunde',
+          signedAt: '2026-08-11T12:00:00.000Z'
+        })
+      })
+    );
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  it('funktioniert ohne Unterschrift (kein Abschnitt, kein Fehler)', async () => {
+    const blob = await buildReportDocx(fakeFullReport({ report: fakeReport({ signatureBlob: undefined }) }));
+    expect(blob.size).toBeGreaterThan(0);
+  });
 });
 
 describe('suggestedFileName', () => {

@@ -23,6 +23,13 @@ export interface ServiceReport {
   status: ReportStatus;
   notes?: string;
 
+  /** Kunden-Unterschrift (Abnahme) als PNG-Blob vom Unterschriften-Pad, inkl. Original-Pixelgröße für den Export. */
+  signatureBlob?: Blob;
+  signatureWidth?: number;
+  signatureHeight?: number;
+  signedByName?: string;
+  signedAt?: ISODateTime;
+
   timeEntryCount: number;
   totalDurationMinutes: number;
   materialItemCount: number;
