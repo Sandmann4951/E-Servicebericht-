@@ -18,7 +18,7 @@
 <button type="button" class="card" onclick={open}>
   <div class="row">
     <span class="project">{report.projectNumber || 'Ohne Projektnummer'}</span>
-    <StatusBadge status={report.status} />
+    <StatusBadge status={report.status} signed={!!report.signedAt} />
   </div>
 
   {#if report.customer}

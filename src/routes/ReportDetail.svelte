@@ -414,11 +414,18 @@
         <button
           type="button"
           class="status-toggle"
-          class:completed={status === 'completed'}
+          class:completed={status === 'completed' && !locked}
+          class:signed={locked}
           onclick={toggleStatus}
           disabled={locked}
         >
-          {status === 'open' ? '● Offen' : '✓ Abgeschlossen'}
+          {#if locked}
+            🔒 Unterschrieben
+          {:else if status === 'open'}
+            ● Offen
+          {:else}
+            ✓ Abgeschlossen
+          {/if}
         </button>
       </div>
 
@@ -627,6 +634,11 @@
   .status-toggle.completed {
     background: var(--color-completed-bg);
     color: var(--color-completed);
+  }
+
+  .status-toggle.signed {
+    background: var(--color-signed-bg);
+    color: var(--color-signed);
   }
 
   .tabs {

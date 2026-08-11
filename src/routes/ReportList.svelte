@@ -145,6 +145,9 @@
     <button type="button" class:active={filter === 'completed'} onclick={() => (filter = 'completed')}>
       Abgeschlossen
     </button>
+    <button type="button" class:active={filter === 'signed'} onclick={() => (filter = 'signed')}>
+      Unterschrieben
+    </button>
   </div>
 
   <div class="content">

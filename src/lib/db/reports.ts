@@ -38,13 +38,19 @@ export async function getReport(id: ID): Promise<ServiceReport | undefined> {
   return db.get('reports', id);
 }
 
-export type ReportFilter = 'all' | ReportStatus;
+// 'signed' ist kein eigener ReportStatus (unterschriebene Berichte sind in
+// den Daten immer zusätzlich 'completed', siehe automatische Statusänderung
+// beim Unterschreiben) - als Filter aber eine eigene, genauere Sicht auf
+// denselben Zustand.
+export type ReportFilter = 'all' | ReportStatus | 'signed';
 
 /** Liste aller Berichte, neueste Änderung zuerst. */
 export async function listReports(filter: ReportFilter = 'all'): Promise<ServiceReport[]> {
   const db = await getDB();
-  const all = filter === 'all' ? await db.getAll('reports') : await db.getAllFromIndex('reports', 'status', filter);
-  return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const all =
+    filter === 'all' || filter === 'signed' ? await db.getAll('reports') : await db.getAllFromIndex('reports', 'status', filter);
+  const filtered = filter === 'signed' ? all.filter((report) => !!report.signedAt) : all;
+  return filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 /**

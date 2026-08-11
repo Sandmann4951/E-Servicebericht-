@@ -64,6 +64,21 @@ describe('reports repository', () => {
     expect(completedReports.map((r) => r.id)).toEqual([completed.id]);
   });
 
+  it('filtert Berichte nach "signed" (nur unterschriebene, unabhängig vom internen Status)', async () => {
+    const unsigned = await createReport({ projectNumber: 'UNSIGNED' });
+    const signed = await createReport({ projectNumber: 'SIGNED' });
+    await setReportSignature(signed.id, {
+      blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+      width: 10,
+      height: 10
+    });
+
+    const signedReports = await listReports('signed');
+
+    expect(signedReports.map((r) => r.id)).toEqual([signed.id]);
+    expect(signedReports.map((r) => r.id)).not.toContain(unsigned.id);
+  });
+
   it('aktualisiert Felder eines Berichts', async () => {
     const report = await createReport({ projectNumber: '1' });
     await new Promise((resolve) => setTimeout(resolve, 2));
