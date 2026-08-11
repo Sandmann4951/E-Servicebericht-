@@ -10,11 +10,12 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 - **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer – mit Autovervollständigung aus einem mitgelieferten Standard-Materialstamm für Elektroinstallation (`src/lib/materialCatalog.ts`) sowie bereits im Bericht verwendeten Bezeichnungen
 - **Fotos** des Einsatzes über Kamera oder Fotobibliothek hochladen, mit Vollbild-Ansicht
 - **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten inkl. Kurzbeschreibung/Ansprechpartner, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos) als editierbare Datei mit farblichem Layout (Theme-Akzentfarbe, Tabellen-Header-Shading, Zebra-Streifen) – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
+- **Backup & Wiederherstellung**: Der komplette Datenbestand (alle Berichte, Zeiten, Material, Fotos) lässt sich in der Berichtsliste oben als eine JSON-Datei sichern (💾) und auf einem anderen Gerät/nach Datenverlust wieder einspielen (📥) – wichtig, da alle Daten sonst ausschließlich lokal auf einem Gerät liegen. Vor dem Import wird eine Zusammenfassung angezeigt und um Bestätigung gebeten; vorhandene Berichte mit gleicher ID werden dabei überschrieben
 - **Autosave** – kein Speichern-Button nötig, Eingaben werden automatisch gesichert
 - **Offlinefähig** – alle Daten liegen lokal auf dem Gerät (IndexedDB), keine Internetverbindung nötig
 - **Installierbar** – "Zum Home-Bildschirm hinzufügen" für App-artiges Verhalten auf iOS/Android
 
-Aktuell bewusst außerhalb des Umfangs: Backup/Wiederherstellung als Datei, Kunden-Unterschrift im Bericht, PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
+Aktuell bewusst außerhalb des Umfangs: Kunden-Unterschrift im Bericht, PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
 
 ## Tech-Stack
 
@@ -63,14 +64,15 @@ src/
     ReportDetail.svelte           # Bericht anlegen/ansehen/bearbeiten
   lib/
     db/                            # IndexedDB-Datenzugriffsschicht (Repository-Pattern)
-      types.ts, client.ts, summary.ts
+      types.ts, client.ts, summary.ts, backup.ts
       reports.ts, timeEntries.ts, materialItems.ts, photos.ts
     export/                        # Word-Export: getFullReport.ts (Daten aggregieren), docxExport.ts (Dokument bauen)
+    backup/                         # backupFile.ts: Sicherungsdatei bauen/einlesen (Fotos base64-kodiert)
     components/                   # UI-Bausteine (Zeiten/Material/Fotos-Sektionen, PWA-Hinweise, …)
     utils/                          # Datum/Dauer-Formatierung, Debounce, Thumbnail-Erzeugung
     materialCatalog.ts               # Standard-Materialstamm für die Bezeichnung-Autovervollständigung
     router.svelte.ts                # Minimaler Hash-Router (kein zusätzliches npm-Paket nötig)
-  tests/                            # Vitest-Tests für Datenzugriffsschicht und Export
+  tests/                            # Vitest-Tests für Datenzugriffsschicht, Export und Backup
 ```
 
 Die UI greift nie direkt auf `idb` zu, sondern ausschließlich über die Funktionen in `src/lib/db/*.ts`. Das hält die Komponenten einfach und erlaubt es später, die lokale Implementierung z.B. durch ein synchronisierendes Backend zu ersetzen, ohne den UI-Code anzufassen.

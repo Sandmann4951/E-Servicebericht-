@@ -1,11 +1,15 @@
 <script lang="ts">
   import { getGloballyActiveTimeEntry, getReport, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import { navigate } from '../lib/router.svelte';
 
   let reports = $state<ServiceReport[]>([]);
   let filter = $state<ReportFilter>('all');
   let loading = $state(true);
+  let backupBusy = $state(false);
+  let backupError = $state('');
+  let fileInput: HTMLInputElement | undefined;
 
   interface ActiveSession {
     reportId: string;
@@ -14,13 +18,15 @@
   }
   let activeSession = $state<ActiveSession | undefined>(undefined);
 
-  $effect(() => {
-    const currentFilter = filter;
+  async function loadReports(): Promise<void> {
     loading = true;
-    listReports(currentFilter).then((result) => {
-      reports = result;
-      loading = false;
-    });
+    reports = await listReports(filter);
+    loading = false;
+  }
+
+  $effect(() => {
+    filter;
+    loadReports();
   });
 
   // Läuft einmal beim Mount - reicht aus, da diese Komponente bei jedem
@@ -42,12 +48,89 @@
   function newReport(): void {
     navigate('/reports/new');
   }
+
+  async function exportBackup(): Promise<void> {
+    if (backupBusy) return;
+    backupBusy = true;
+    backupError = '';
+    try {
+      const blob = await buildBackupFile();
+      const fileName = suggestedBackupFileName();
+      const file = new File([blob], fileName, { type: 'application/json' });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      backupError = 'Sicherung konnte nicht erstellt werden. Bitte erneut versuchen.';
+      console.error('Backup-Export fehlgeschlagen', err);
+    } finally {
+      backupBusy = false;
+    }
+  }
+
+  function triggerImport(): void {
+    fileInput?.click();
+  }
+
+  async function handleImportFile(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ''; // gleiche Datei muss danach erneut wählbar sein
+    if (!file) return;
+
+    backupBusy = true;
+    backupError = '';
+    try {
+      const { data, summary } = await parseBackupFile(file);
+      const confirmed = confirm(
+        `Sicherung enthält ${summary.reportCount} Berichte, ${summary.timeEntryCount} Zeiteinträge, ` +
+          `${summary.materialItemCount} Materialpositionen und ${summary.photoCount} Fotos.\n\n` +
+          `Jetzt importieren? Vorhandene Berichte mit gleicher ID werden dabei überschrieben.`
+      );
+      if (!confirmed) return;
+
+      await restoreBackup(data);
+      await loadReports();
+    } catch (err) {
+      backupError = err instanceof Error ? err.message : 'Import fehlgeschlagen. Bitte erneut versuchen.';
+      console.error('Backup-Import fehlgeschlagen', err);
+    } finally {
+      backupBusy = false;
+    }
+  }
 </script>
 
 <div class="screen">
   <header class="header">
     <h1>Serviceberichte</h1>
+    <div class="backup-actions">
+      <button type="button" onclick={exportBackup} disabled={backupBusy} aria-label="Sicherung exportieren">💾</button>
+      <button type="button" onclick={triggerImport} disabled={backupBusy} aria-label="Sicherung wiederherstellen">
+        📥
+      </button>
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="application/json,.json"
+        class="visually-hidden"
+        onchange={handleImportFile}
+      />
+    </div>
   </header>
+  {#if backupError}
+    <p class="backup-error">{backupError}</p>
+  {/if}
 
   {#if activeSession}
     <button type="button" class="active-session" onclick={() => navigate(`/reports/${activeSession?.reportId}`)}>
@@ -94,12 +177,40 @@
   }
 
   .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
     padding: calc(var(--space-4) + var(--safe-top)) var(--space-4) var(--space-2);
   }
 
   .header h1 {
     margin: 0;
     font-size: 1.4rem;
+  }
+
+  .backup-actions {
+    display: flex;
+    gap: var(--space-1);
+  }
+
+  .backup-actions button {
+    background: transparent;
+    border: none;
+    font-size: 1.3rem;
+    padding: var(--space-2);
+    min-height: auto;
+  }
+
+  .backup-actions button:disabled {
+    opacity: 0.5;
+  }
+
+  .backup-error {
+    margin: 0 var(--space-4) var(--space-3);
+    color: var(--color-danger);
+    font-size: 0.85rem;
+    text-align: center;
   }
 
   .active-session {
