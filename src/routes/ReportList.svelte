@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { getGloballyActiveTimeEntry, getReport, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import { navigate } from '../lib/router.svelte';
 
@@ -7,12 +7,35 @@
   let filter = $state<ReportFilter>('all');
   let loading = $state(true);
 
+  interface ActiveSession {
+    reportId: string;
+    projectNumber: string;
+    startTime: string;
+  }
+  let activeSession = $state<ActiveSession | undefined>(undefined);
+
   $effect(() => {
     const currentFilter = filter;
     loading = true;
     listReports(currentFilter).then((result) => {
       reports = result;
       loading = false;
+    });
+  });
+
+  // Läuft einmal beim Mount - reicht aus, da diese Komponente bei jedem
+  // Zurücknavigieren zur Liste (kein {#key}-Wrapper in App.svelte) ohnehin
+  // frisch gemountet wird und so den aktuellen Stand neu abfragt.
+  $effect(() => {
+    getGloballyActiveTimeEntry().then(async (entry) => {
+      if (!entry?.startTime) {
+        activeSession = undefined;
+        return;
+      }
+      const report = await getReport(entry.reportId);
+      activeSession = report
+        ? { reportId: report.id, projectNumber: report.projectNumber, startTime: entry.startTime }
+        : undefined;
     });
   });
 
@@ -25,6 +48,13 @@
   <header class="header">
     <h1>Serviceberichte</h1>
   </header>
+
+  {#if activeSession}
+    <button type="button" class="active-session" onclick={() => navigate(`/reports/${activeSession?.reportId}`)}>
+      <span class="dot"></span>
+      Eingestempelt in „{activeSession.projectNumber}“ seit {activeSession.startTime}
+    </button>
+  {/if}
 
   <div class="filters" role="tablist" aria-label="Berichte filtern">
     <button type="button" class:active={filter === 'all'} onclick={() => (filter = 'all')}>Alle</button>
@@ -70,6 +100,40 @@
   .header h1 {
     margin: 0;
     font-size: 1.4rem;
+  }
+
+  .active-session {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 var(--space-4) var(--space-3);
+    background: var(--color-open-bg);
+    color: var(--color-open);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-align: left;
+  }
+
+  .active-session .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-open);
+    flex-shrink: 0;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
 
   .filters {

@@ -181,8 +181,11 @@
 
   async function toggleStatus(): Promise<void> {
     status = status === 'open' ? 'completed' : 'open';
-    flushNow();
-    await saveChain;
+    // Bewusst NICHT über flushNow(): der Status-Button löst kein
+    // oninput={onFieldChange} aus, es gäbe also nichts "Pending" zum
+    // Flushen - queueSave() direkt aufzurufen ist hier der korrekte Weg,
+    // sonst wird die Änderung nie gespeichert (siehe Regressionstest).
+    await queueSave();
   }
 
   async function removeReport(): Promise<void> {

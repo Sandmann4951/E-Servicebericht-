@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport, deleteReport, getReport, listReports, updateReport } from '../../lib/db/reports';
+import { addTimeEntry } from '../../lib/db/timeEntries';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -74,5 +75,27 @@ describe('reports repository', () => {
     const report = await createReport({ projectNumber: '1' });
     await deleteReport(report.id);
     expect(await getReport(report.id)).toBeUndefined();
+  });
+
+  it('verliert bei gleichzeitigem updateReport() und Zeiteintrag-Anlage keine der beiden Änderungen', async () => {
+    // Regressionstest: updateReport() nutzte früher zwei getrennte
+    // Transaktionen (db.get + db.put) statt einer gemeinsamen. Parallel dazu
+    // schreibt addTimeEntry() (über recomputeReportSummary) ebenfalls den
+    // reports-Datensatz. Ohne gemeinsame Transaktion konnte der zuletzt
+    // abgeschlossene Schreibvorgang den anderen überschreiben - z.B. einen
+    // Status-Wechsel zurück auf "completed" kippen, obwohl der Nutzer gerade
+    // erst auf "open" umgeschaltet hatte.
+    const report = await createReport({ projectNumber: '1', notes: 'x' });
+    await updateReport(report.id, { status: 'completed' });
+
+    await Promise.all([
+      updateReport(report.id, { status: 'open' }),
+      addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' })
+    ]);
+
+    const final = await getReport(report.id);
+    expect(final?.status).toBe('open');
+    expect(final?.timeEntryCount).toBe(1);
+    expect(final?.totalDurationMinutes).toBe(120);
   });
 });

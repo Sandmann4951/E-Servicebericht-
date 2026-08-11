@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport, getReport } from '../../lib/db/reports';
-import { addTimeEntry, deleteTimeEntry, getActiveTimeEntry, listTimeEntries, updateTimeEntry } from '../../lib/db/timeEntries';
+import {
+  addTimeEntry,
+  deleteTimeEntry,
+  getActiveTimeEntry,
+  getGloballyActiveTimeEntry,
+  listTimeEntries,
+  updateTimeEntry
+} from '../../lib/db/timeEntries';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -92,5 +99,30 @@ describe('getActiveTimeEntry (Ein-/Ausstempeln)', () => {
     const active = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
 
     expect((await getActiveTimeEntry(report.id))?.id).toBe(active.id);
+  });
+});
+
+describe('getGloballyActiveTimeEntry (nur eine Stempel-Session gleichzeitig)', () => {
+  it('liefert undefined, wenn nirgends eingestempelt ist', async () => {
+    await createReport({ projectNumber: '1' });
+    expect(await getGloballyActiveTimeEntry()).toBeUndefined();
+  });
+
+  it('findet einen laufenden Eintrag berichtsübergreifend', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    await createReport({ projectNumber: 'B' });
+    const entry = await addTimeEntry(reportA.id, { date: '2026-08-11', startTime: '08:00' });
+
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.id).toBe(entry.id);
+    expect(active?.reportId).toBe(reportA.id);
+  });
+
+  it('ist undefined, nachdem in allen Berichten ausgestempelt wurde', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00' });
+    await updateTimeEntry(entry.id, { endTime: '16:00' });
+
+    expect(await getGloballyActiveTimeEntry()).toBeUndefined();
   });
 });

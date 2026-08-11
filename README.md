@@ -5,7 +5,7 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 ## Funktionen (MVP)
 
 - **Projektnummer** je Servicebericht (Pflichtfeld), dazu optional Kurzbeschreibung, Kunde, Ansprechpartner beim Kunden, Techniker und Status (offen/abgeschlossen)
-- **Ein-/Ausstempeln**: Ein Tap startet einen laufenden Zeiteintrag (Startzeit = jetzt), ein weiterer Tap beendet ihn (Endzeit = jetzt, Dauer wird automatisch berechnet). Der entstandene Zeiteintrag lässt sich wie jeder andere im Zeiten-Tab manuell nachbearbeiten
+- **Ein-/Ausstempeln**: Ein Tap startet einen laufenden Zeiteintrag (Startzeit = jetzt), ein weiterer Tap beendet ihn (Endzeit = jetzt, Dauer wird automatisch berechnet). Der entstandene Zeiteintrag lässt sich wie jeder andere im Zeiten-Tab manuell nachbearbeiten. Es kann immer nur in einem Bericht gleichzeitig eingestempelt sein (beim Versuch, in einem zweiten einzustempeln, wird angeboten, im ersten automatisch auszustempeln); die Berichtsliste zeigt oben ein Banner, in welchem Bericht gerade eingestempelt ist
 - **Zeiten pro Tag** erfassen: Datum, Start-/Endzeit (Dauer wird automatisch berechnet), optionale Notiz
 - **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer – mit Autovervollständigung aus einem mitgelieferten Standard-Materialstamm für Elektroinstallation (`src/lib/materialCatalog.ts`) sowie bereits im Bericht verwendeten Bezeichnungen
 - **Fotos** des Einsatzes über Kamera oder Fotobibliothek hochladen, mit Vollbild-Ansicht

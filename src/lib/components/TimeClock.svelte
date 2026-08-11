@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { addTimeEntry, getActiveTimeEntry, updateTimeEntry } from '../db/timeEntries';
+  import { addTimeEntry, getActiveTimeEntry, getGloballyActiveTimeEntry, updateTimeEntry } from '../db/timeEntries';
+  import { getReport } from '../db/reports';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm, todayISODate } from '../utils/date';
 
@@ -41,6 +42,18 @@
     if (busy || activeEntry) return;
     busy = true;
     try {
+      // Man kann immer nur in EINEM Bericht gleichzeitig eingestempelt sein.
+      // Läuft anderswo noch eine Session, muss die zuerst beendet werden.
+      const otherActive = await getGloballyActiveTimeEntry();
+      if (otherActive && otherActive.reportId !== reportId) {
+        const otherReport = await getReport(otherActive.reportId);
+        const label = otherReport?.projectNumber ?? 'einem anderen Bericht';
+        const confirmed = confirm(
+          `Du bist noch in "${label}" eingestempelt (seit ${otherActive.startTime}). Dort jetzt ausstempeln und hier neu einstempeln?`
+        );
+        if (!confirmed) return;
+        await updateTimeEntry(otherActive.id, { endTime: nowHHmm() });
+      }
       await addTimeEntry(reportId, { date: todayISODate(), startTime: nowHHmm() });
       await load();
       onChanged();

@@ -47,6 +47,22 @@ export async function getActiveTimeEntry(reportId: ID): Promise<TimeEntry | unde
   return open.at(-1);
 }
 
+/**
+ * Der aktuell laufende Zeiteintrag über ALLE Berichte hinweg (unabhängig
+ * davon, in welchem Bericht man sich gerade befindet) - damit lässt sich
+ * verhindern, dass man gleichzeitig in mehreren Berichten eingestempelt ist.
+ * Es sollte höchstens einen geben; falls doch mehrere existieren, wird der
+ * zuletzt begonnene zurückgegeben.
+ */
+export async function getGloballyActiveTimeEntry(): Promise<TimeEntry | undefined> {
+  const db = await getDB();
+  const all = await db.getAll('timeEntries');
+  const open = all
+    .filter((entry) => entry.startTime && !entry.endTime)
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? '').localeCompare(b.startTime ?? ''));
+  return open.at(-1);
+}
+
 export async function addTimeEntry(reportId: ID, input: TimeEntryInput): Promise<TimeEntry> {
   const db = await getDB();
   const now = new Date().toISOString();

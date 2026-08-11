@@ -56,8 +56,20 @@ export type UpdateReportPatch = Partial<
 
 export async function updateReport(id: ID, patch: UpdateReportPatch): Promise<ServiceReport | undefined> {
   const db = await getDB();
-  const report = await db.get('reports', id);
-  if (!report) return undefined;
+  // Lesen und Schreiben bewusst in EINER Transaktion statt über die
+  // db.get()/db.put()-Shorthands (die jeweils eine eigene, sofort
+  // abgeschlossene Transaktion öffnen): IndexedDB serialisiert automatisch
+  // Transaktionen mit überlappendem Scope im readwrite-Modus - das schützt
+  // hier vor einem verlorenen Update, wenn parallel z.B. recomputeReportSummary()
+  // (ausgelöst durchs Hinzufügen einer Zeit/Material/Foto) denselben
+  // Report-Datensatz liest und schreibt.
+  const tx = db.transaction('reports', 'readwrite');
+  const store = tx.objectStore('reports');
+  const report = await store.get(id);
+  if (!report) {
+    await tx.done;
+    return undefined;
+  }
 
   if (patch.projectNumber !== undefined) report.projectNumber = patch.projectNumber.trim();
   if (patch.projectDescription !== undefined) report.projectDescription = patch.projectDescription.trim() || undefined;
@@ -68,7 +80,8 @@ export async function updateReport(id: ID, patch: UpdateReportPatch): Promise<Se
   if (patch.notes !== undefined) report.notes = patch.notes.trim() || undefined;
   report.updatedAt = new Date().toISOString();
 
-  await db.put('reports', report);
+  await store.put(report);
+  await tx.done;
   return report;
 }
 
