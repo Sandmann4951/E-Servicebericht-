@@ -6,18 +6,20 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 
 - **Projektnummer** je Servicebericht (Pflichtfeld), dazu optional Kunde, Techniker und Status (offen/abgeschlossen)
 - **Zeiten pro Tag** erfassen: Datum, Start-/Endzeit (Dauer wird automatisch berechnet), optionale Notiz
-- **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer
+- **Verbautes Material**: Bezeichnung, Menge, Einheit, optionale Artikelnummer – mit Autovervollständigung aus einem mitgelieferten Standard-Materialstamm für Elektroinstallation (`src/lib/materialCatalog.ts`) sowie bereits im Bericht verwendeten Bezeichnungen
 - **Fotos** des Einsatzes über Kamera oder Fotobibliothek hochladen, mit Vollbild-Ansicht
+- **Export als Word-Dokument (.docx)**: kompletter Bericht (Kopfdaten, Zeiten-Tabelle, Material-Tabelle, Notizen, Fotos) als editierbare Datei – läuft rein clientseitig (kein Server), mit direktem Teilen über das iOS-Share-Sheet (Mail/WhatsApp/AirDrop), wenn verfügbar
 - **Autosave** – kein Speichern-Button nötig, Eingaben werden automatisch gesichert
 - **Offlinefähig** – alle Daten liegen lokal auf dem Gerät (IndexedDB), keine Internetverbindung nötig
 - **Installierbar** – "Zum Home-Bildschirm hinzufügen" für App-artiges Verhalten auf iOS/Android
 
-Aktuell bewusst außerhalb des Umfangs: PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
+Aktuell bewusst außerhalb des Umfangs: Backup/Wiederherstellung als Datei, Kunden-Unterschrift im Bericht, PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
 
 ## Tech-Stack
 
 - [Vite](https://vitejs.dev/) + [Svelte 5](https://svelte.dev/) + TypeScript
 - [`idb`](https://github.com/jakearchibald/idb) als schlanker IndexedDB-Wrapper (lokale Datenhaltung, kein Backend)
+- [`docx`](https://github.com/dolanmiu/docx) für den clientseitigen Word-Export (per dynamischem Import nachgeladen, nicht im Hauptbundle)
 - [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/) für Manifest + Service Worker (Workbox)
 - [Vitest](https://vitest.dev/) + [`fake-indexeddb`](https://github.com/dumbmatter/fakeIndexedDB) für die Tests der Datenzugriffsschicht
 
@@ -62,10 +64,12 @@ src/
     db/                            # IndexedDB-Datenzugriffsschicht (Repository-Pattern)
       types.ts, client.ts, summary.ts
       reports.ts, timeEntries.ts, materialItems.ts, photos.ts
+    export/                        # Word-Export: getFullReport.ts (Daten aggregieren), docxExport.ts (Dokument bauen)
     components/                   # UI-Bausteine (Zeiten/Material/Fotos-Sektionen, PWA-Hinweise, …)
     utils/                          # Datum/Dauer-Formatierung, Debounce, Thumbnail-Erzeugung
+    materialCatalog.ts               # Standard-Materialstamm für die Bezeichnung-Autovervollständigung
     router.svelte.ts                # Minimaler Hash-Router (kein zusätzliches npm-Paket nötig)
-  tests/                            # Vitest-Tests für die Datenzugriffsschicht
+  tests/                            # Vitest-Tests für Datenzugriffsschicht und Export
 ```
 
 Die UI greift nie direkt auf `idb` zu, sondern ausschließlich über die Funktionen in `src/lib/db/*.ts`. Das hält die Komponenten einfach und erlaubt es später, die lokale Implementierung z.B. durch ein synchronisierendes Backend zu ersetzen, ohne den UI-Code anzufassen.

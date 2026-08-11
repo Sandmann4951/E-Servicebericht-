@@ -26,6 +26,7 @@
     "vitest": "^2.1.5"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "idb": "^8.0.0"
   }
 }

@@ -34,6 +34,8 @@
   let savedPulseVisible = $state(false);
   let savedPulseTimeout: ReturnType<typeof setTimeout> | undefined;
   let projectNumberMissing = $state(false);
+  let exporting = $state(false);
+  let exportError = $state(false);
 
   function flashSaved(): void {
     savedPulseVisible = true;
@@ -144,6 +146,49 @@
     navigate('/', { replace: true });
   }
 
+  async function exportReport(): Promise<void> {
+    if (!reportId || exporting) return;
+    exporting = true;
+    exportError = false;
+    try {
+      const [{ getFullReport }, { buildReportDocx, suggestedFileName }] = await Promise.all([
+        import('../lib/export/getFullReport'),
+        import('../lib/export/docxExport')
+      ]);
+      const data = await getFullReport(reportId);
+      if (!data) return;
+
+      const blob = await buildReportDocx(data);
+      const fileName = suggestedFileName(data.report);
+      const mimeType = blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const file = new File([blob], fileName, { type: mimeType });
+
+      // Auf dem iPhone spürbar besserer Workflow: direkt aus dem Share-Sheet
+      // per Mail/WhatsApp/AirDrop verschicken, statt erst in Dateien suchen zu
+      // müssen. Fallback auf klassischen Download, wenn nicht unterstützt.
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      exportError = true;
+      console.error('Export fehlgeschlagen', err);
+    } finally {
+      exporting = false;
+    }
+  }
+
   function back(): void {
     if (!reportId && !projectNumber.trim()) {
       // Reiner Entwurf ohne Projektnummer - nichts zu speichern, einfach zurück.
@@ -171,9 +216,21 @@
       <span class="saved">✓ Gespeichert</span>
     {/if}
     {#if reportId}
+      <button
+        type="button"
+        class="export-report"
+        onclick={exportReport}
+        disabled={exporting}
+        aria-label="Als Word-Dokument exportieren"
+      >
+        {exporting ? '…' : '⬇️'}
+      </button>
       <button type="button" class="delete-report" onclick={removeReport} aria-label="Bericht löschen">🗑</button>
     {/if}
   </header>
+  {#if exportError}
+    <p class="export-error">Export fehlgeschlagen. Bitte erneut versuchen.</p>
+  {/if}
 
   {#if loading}
     <p class="hint">Lade Bericht…</p>
@@ -286,12 +343,17 @@
   }
 
   .back,
+  .export-report,
   .delete-report {
     background: transparent;
     border: none;
     font-size: 1.2rem;
     padding: var(--space-2);
     min-height: auto;
+  }
+
+  .export-report:disabled {
+    opacity: 0.5;
   }
 
   .delete-report {
@@ -303,6 +365,14 @@
     color: var(--color-success);
     font-weight: 600;
     white-space: nowrap;
+  }
+
+  .export-error {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    color: var(--color-danger);
+    font-size: 0.85rem;
+    text-align: center;
   }
 
   .hint {

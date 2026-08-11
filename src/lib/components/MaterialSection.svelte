@@ -1,10 +1,14 @@
 <script lang="ts">
   import { addMaterialItem, deleteMaterialItem, listMaterialItems, updateMaterialItem } from '../db/materialItems';
   import type { MaterialItem } from '../db/types';
+  import { STANDARD_MATERIALS } from '../materialCatalog';
 
   let { reportId, onChanged }: { reportId: string; onChanged: () => void } = $props();
 
   const commonUnits = ['Stk', 'm', 'Set', 'Std', 'kg', 'lfm', 'Pkg'];
+  const unitByDescription = new Map(STANDARD_MATERIALS.map((entry) => [entry.description, entry.unit]));
+  let descriptionOptions = $state<string[]>(STANDARD_MATERIALS.map((entry) => entry.description));
+  let unitTouched = $state(false);
 
   let items = $state<MaterialItem[]>([]);
   let loading = $state(true);
@@ -20,6 +24,10 @@
     loading = true;
     items = await listMaterialItems(reportId);
     loading = false;
+    // Vorschlagsliste wächst um bereits in diesem Bericht verwendete
+    // Bezeichnungen, zusätzlich zum Standard-Materialstamm (dedupliziert).
+    const used = items.map((item) => item.description);
+    descriptionOptions = [...new Set([...STANDARD_MATERIALS.map((entry) => entry.description), ...used])];
   }
 
   $effect(() => {
@@ -34,6 +42,7 @@
     formArticleNumber = '';
     editingId = undefined;
     showForm = false;
+    unitTouched = false;
   }
 
   function startAdd(): void {
@@ -47,7 +56,19 @@
     formQuantity = String(item.quantity);
     formUnit = item.unit;
     formArticleNumber = item.articleNumber ?? '';
+    unitTouched = true; // Einheit eines bestehenden Eintrags nicht durch Katalog-Match überschreiben.
     showForm = true;
+  }
+
+  /** Übernimmt bei einer Katalog-Bezeichnung automatisch die hinterlegte Einheit, sofern der Nutzer sie noch nicht selbst geändert hat. */
+  function onDescriptionInput(): void {
+    if (unitTouched) return;
+    const suggestedUnit = unitByDescription.get(formDescription.trim());
+    if (suggestedUnit) formUnit = suggestedUnit;
+  }
+
+  function onUnitInput(): void {
+    unitTouched = true;
   }
 
   async function save(): Promise<void> {
@@ -109,7 +130,19 @@
     >
       <label>
         Bezeichnung
-        <input type="text" bind:value={formDescription} placeholder="z.B. Kabel NYM-J 3x1,5" required />
+        <input
+          type="text"
+          list="description-options"
+          bind:value={formDescription}
+          oninput={onDescriptionInput}
+          placeholder="z.B. Kabel NYM-J 3x1,5"
+          required
+        />
+        <datalist id="description-options">
+          {#each descriptionOptions as description (description)}
+            <option value={description}></option>
+          {/each}
+        </datalist>
       </label>
       <div class="two-col">
         <label>
@@ -118,7 +151,7 @@
         </label>
         <label>
           Einheit
-          <input type="text" list="unit-options" bind:value={formUnit} />
+          <input type="text" list="unit-options" bind:value={formUnit} oninput={onUnitInput} />
           <datalist id="unit-options">
             {#each commonUnits as unit (unit)}
               <option value={unit}></option>
