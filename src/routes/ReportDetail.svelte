@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { clearReportSignature, createReport, deleteReport, getReport, setReportSignature, updateReport } from '../lib/db/reports';
+  import {
+    createReport,
+    deleteReport,
+    finalizeReport,
+    getReport,
+    markReportExported,
+    setReportSignature,
+    unlockReport,
+    updateReport
+  } from '../lib/db/reports';
   import { getActiveTimeEntry, updateTimeEntry } from '../lib/db/timeEntries';
   import type { ReportStatus } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -38,12 +47,15 @@
   let signatureBlob = $state<Blob | undefined>(undefined);
   let signedByName = $state<string | undefined>(undefined);
   let signedAt = $state<string | undefined>(undefined);
+  let finalizedAt = $state<string | undefined>(undefined);
 
-  // Ein unterschriebener Bericht gilt als abgeschlossen und darf nicht mehr
-  // verändert werden - die Sperre hängt bewusst direkt an signedAt statt an
-  // einem eigenen Flag, damit sie nie aus dem Tritt geraten kann. Einziger
-  // Weg zurück: die Unterschrift über SignatureSection wieder entfernen.
-  const locked = $derived(!!signedAt);
+  // Ein final abgeschlossener Bericht darf nicht mehr verändert werden - die
+  // Sperre hängt an `finalizedAt`, das sowohl beim Unterschreiben als auch
+  // beim manuellen Abschließen ohne Unterschrift gesetzt wird (siehe
+  // saveSignature()/finalizeWithoutSignature()). Einziger Weg zurück: die
+  // Sperre bewusst wieder aufheben (unlockManually() bzw. "Entfernen" im
+  // Unterschrift-Tab).
+  const locked = $derived(!!finalizedAt);
 
   let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos' | 'unterschrift'>('übersicht');
   let savedPulseVisible = $state(false);
@@ -161,6 +173,7 @@
       signatureBlob = report.signatureBlob;
       signedByName = report.signedByName;
       signedAt = report.signedAt;
+      finalizedAt = report.finalizedAt;
       loading = false;
     });
     return () => {
@@ -194,6 +207,19 @@
     photoCount = report.photoCount;
   }
 
+  /**
+   * Beendet eine ggf. noch laufende Stempeluhr dieses Berichts - wird sowohl
+   * beim Unterschreiben als auch beim manuellen Abschließen ohne Unterschrift
+   * aufgerufen, damit beim Sperren kein offener Zeiteintrag zurückbleibt.
+   */
+  async function autoStopActiveClock(): Promise<void> {
+    if (!reportId) return;
+    const activeEntry = await getActiveTimeEntry(reportId);
+    if (!activeEntry) return;
+    await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
+    await refreshSummary();
+  }
+
   async function saveSignature(blob: Blob, name: string, width: number, height: number): Promise<void> {
     if (!reportId) return;
     const updated = await setReportSignature(reportId, { blob, signedByName: name, width, height });
@@ -201,29 +227,52 @@
     signatureBlob = updated.signatureBlob;
     signedByName = updated.signedByName;
     signedAt = updated.signedAt;
+    finalizedAt = updated.finalizedAt;
     flashSaved();
 
-    // Unterschreiben sperrt den Bericht (siehe `locked`). Eine noch laufende
-    // Stempeluhr in diesem Bericht wird dabei automatisch beendet - sonst
-    // bliebe sie offen, ohne dass sie nach der Sperre noch jemand ausstempeln
-    // könnte. Der Status springt konsequent auf "Abgeschlossen".
-    const activeEntry = await getActiveTimeEntry(reportId);
-    if (activeEntry) {
-      await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
-      await refreshSummary();
-    }
+    // Unterschreiben sperrt den Bericht (siehe `locked`). Der Status springt
+    // konsequent auf "Abgeschlossen".
+    await autoStopActiveClock();
     if (status !== 'completed') status = 'completed';
     await queueSave();
   }
 
+  /** Schließt den Bericht final ab, ohne Kunden-Unterschrift - z.B. wenn keine Unterschrift nötig oder möglich ist. */
+  async function finalizeWithoutSignature(): Promise<void> {
+    if (!reportId || locked) return;
+    if (
+      !confirm(
+        'Bericht ohne Kunden-Unterschrift final abschließen? Er wird danach gesperrt und lässt sich nicht mehr ändern, bis die Sperre wieder aufgehoben wird.'
+      )
+    )
+      return;
+    const updated = await finalizeReport(reportId);
+    if (!updated) return;
+    status = updated.status;
+    finalizedAt = updated.finalizedAt;
+    flashSaved();
+    await autoStopActiveClock();
+  }
+
+  /** Hebt die Sperre auf (egal ob durch Unterschrift oder manuelles Abschließen entstanden) - ohne eigene Bestätigung, wird von den aufrufenden Stellen jeweils selbst abgefragt. */
   async function clearSignature(): Promise<void> {
     if (!reportId) return;
-    const updated = await clearReportSignature(reportId);
+    const updated = await unlockReport(reportId);
     if (!updated) return;
     signatureBlob = updated.signatureBlob;
     signedByName = updated.signedByName;
     signedAt = updated.signedAt;
+    finalizedAt = updated.finalizedAt;
     flashSaved();
+  }
+
+  /** Sperre-aufheben-Button im Banner - Bestätigungstext hängt davon ab, ob dabei auch eine Unterschrift verloren geht. */
+  async function unlockManually(): Promise<void> {
+    const message = signedAt
+      ? 'Bericht entsperren? Dabei wird auch die vorhandene Kunden-Unterschrift entfernt - für eine erneute Freigabe muss ggf. neu unterschrieben werden.'
+      : 'Bericht wirklich entsperren? Er wird dadurch wieder bearbeitbar.';
+    if (!confirm(message)) return;
+    await clearSignature();
   }
 
   async function toggleStatus(): Promise<void> {
@@ -267,6 +316,7 @@
       // müssen. Fallback auf klassischen Download, wenn nicht unterstützt.
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title: fileName });
+        await markReportExported(reportId);
         return;
       }
 
@@ -278,6 +328,7 @@
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      await markReportExported(reportId);
     } catch (err) {
       // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler.
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -341,10 +392,16 @@
   {:else}
     <div class="content">
       {#if locked}
-        <p class="locked-banner">
-          🔒 Unterschrieben am {signedAt ? new Date(signedAt).toLocaleString('de-DE') : ''}{signedByName ? ` von ${signedByName}` : ''}
-          – der Bericht ist gesperrt. Um Änderungen vorzunehmen, muss die Unterschrift im Tab "Unterschrift" zuerst entfernt werden.
-        </p>
+        <div class="locked-banner">
+          <p>
+            {#if signedAt}
+              🔒 Unterschrieben am {new Date(signedAt).toLocaleString('de-DE')}{signedByName ? ` von ${signedByName}` : ''} – der Bericht ist gesperrt.
+            {:else}
+              🔒 Final abgeschlossen am {finalizedAt ? new Date(finalizedAt).toLocaleString('de-DE') : ''} (ohne Unterschrift) – der Bericht ist gesperrt.
+            {/if}
+          </p>
+          <button type="button" class="unlock" onclick={unlockManually}>🔓 Sperre aufheben</button>
+        </div>
       {/if}
       <div class="fields">
         <label class:invalid={projectNumberMissing}>
@@ -411,22 +468,31 @@
           />
         </label>
 
-        <button
-          type="button"
-          class="status-toggle"
-          class:completed={status === 'completed' && !locked}
-          class:signed={locked}
-          onclick={toggleStatus}
-          disabled={locked}
-        >
-          {#if locked}
-            🔒 Unterschrieben
-          {:else if status === 'open'}
-            ● Offen
-          {:else}
-            ✓ Abgeschlossen
+        <div class="status-row">
+          <button
+            type="button"
+            class="status-toggle"
+            class:completed={status === 'completed' && !locked}
+            class:signed={locked}
+            onclick={toggleStatus}
+            disabled={locked}
+          >
+            {#if locked && signedAt}
+              🔒 Unterschrieben
+            {:else if locked}
+              🔒 Final abgeschlossen
+            {:else if status === 'open'}
+              ● Offen
+            {:else}
+              ✓ Abgeschlossen
+            {/if}
+          </button>
+          {#if !locked}
+            <button type="button" class="finalize-btn" onclick={finalizeWithoutSignature}>
+              🔒 Ohne Unterschrift final abschließen
+            </button>
           {/if}
-        </button>
+        </div>
       </div>
 
       <div class="tabs" role="tablist" aria-label="Bereich wählen">
@@ -578,12 +644,31 @@
   .locked-banner {
     margin: var(--space-4) var(--space-4) 0;
     padding: var(--space-3) var(--space-4);
-    background: var(--color-open-bg);
-    color: var(--color-open);
+    background: var(--color-signed-bg);
+    color: var(--color-signed);
     border-radius: var(--radius-md);
     font-size: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: flex-start;
+  }
+
+  .locked-banner p {
+    margin: 0;
     font-weight: 600;
     line-height: 1.4;
+  }
+
+  .locked-banner .unlock {
+    background: transparent;
+    border: 1px solid currentColor;
+    color: inherit;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    min-height: auto;
+    font-weight: 600;
+    font-size: 0.8rem;
   }
 
   .fields {
@@ -620,6 +705,13 @@
     color: var(--color-danger);
   }
 
+  .status-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
   .status-toggle {
     align-self: flex-start;
     background: var(--color-open-bg);
@@ -627,6 +719,17 @@
     border: none;
     border-radius: 999px;
     padding: var(--space-2) var(--space-4);
+    font-weight: 600;
+    min-height: auto;
+  }
+
+  .finalize-btn {
+    background: transparent;
+    border: 1px dashed var(--color-border);
+    color: var(--color-text-muted);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    font-size: 0.8rem;
     font-weight: 600;
     min-height: auto;
   }

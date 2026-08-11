@@ -38,18 +38,22 @@ export async function getReport(id: ID): Promise<ServiceReport | undefined> {
   return db.get('reports', id);
 }
 
-// 'signed' ist kein eigener ReportStatus (unterschriebene Berichte sind in
-// den Daten immer zusätzlich 'completed', siehe automatische Statusänderung
-// beim Unterschreiben) - als Filter aber eine eigene, genauere Sicht auf
-// denselben Zustand.
-export type ReportFilter = 'all' | ReportStatus | 'signed';
+// 'locked' und 'not-exported' sind keine eigenen ReportStatus-Werte, sondern
+// Filter auf zusätzliche Zeitstempel (finalizedAt/exportedAt) - als Filter
+// aber eine eigene, genauere Sicht auf den Datenbestand.
+export type ReportFilter = 'all' | ReportStatus | 'locked' | 'not-exported';
 
 /** Liste aller Berichte, neueste Änderung zuerst. */
 export async function listReports(filter: ReportFilter = 'all'): Promise<ServiceReport[]> {
   const db = await getDB();
-  const all =
-    filter === 'all' || filter === 'signed' ? await db.getAll('reports') : await db.getAllFromIndex('reports', 'status', filter);
-  const filtered = filter === 'signed' ? all.filter((report) => !!report.signedAt) : all;
+  const useStatusIndex = filter === 'open' || filter === 'completed';
+  const all = useStatusIndex ? await db.getAllFromIndex('reports', 'status', filter) : await db.getAll('reports');
+  const filtered =
+    filter === 'locked'
+      ? all.filter((report) => !!report.finalizedAt)
+      : filter === 'not-exported'
+        ? all.filter((report) => !report.exportedAt)
+        : all;
   return filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
@@ -108,7 +112,12 @@ export interface SetReportSignatureInput {
   signedByName?: string;
 }
 
-/** Speichert (oder ersetzt) die Kunden-Unterschrift eines Berichts. */
+/**
+ * Speichert (oder ersetzt) die Kunden-Unterschrift eines Berichts und sperrt
+ * ihn damit (siehe `finalizedAt` auf ServiceReport). War der Bericht bereits
+ * über finalizeReport() gesperrt (z.B. nachträglich doch noch unterschrieben),
+ * bleibt der ursprüngliche finalizedAt-Zeitpunkt erhalten.
+ */
 export async function setReportSignature(id: ID, input: SetReportSignatureInput): Promise<ServiceReport | undefined> {
   return withReportTransaction(id, (report) => {
     const now = new Date().toISOString();
@@ -117,19 +126,50 @@ export async function setReportSignature(id: ID, input: SetReportSignatureInput)
     report.signatureHeight = input.height;
     report.signedByName = input.signedByName?.trim() || undefined;
     report.signedAt = now;
+    report.finalizedAt = report.finalizedAt ?? now;
     report.updatedAt = now;
   });
 }
 
-/** Entfernt eine gespeicherte Kunden-Unterschrift wieder. */
-export async function clearReportSignature(id: ID): Promise<ServiceReport | undefined> {
+/**
+ * Schließt einen Bericht final ab und sperrt ihn - ohne Kunden-Unterschrift,
+ * z.B. wenn keine Unterschrift nötig oder möglich ist. Gleicher Sperr-
+ * Mechanismus wie setReportSignature() (siehe `finalizedAt`), nur ohne die
+ * Unterschriften-Felder zu setzen.
+ */
+export async function finalizeReport(id: ID): Promise<ServiceReport | undefined> {
+  return withReportTransaction(id, (report) => {
+    const now = new Date().toISOString();
+    report.status = 'completed';
+    report.finalizedAt = report.finalizedAt ?? now;
+    report.updatedAt = now;
+  });
+}
+
+/**
+ * Hebt die Sperre eines Berichts vollständig wieder auf - egal ob sie durch
+ * eine Unterschrift oder durch finalizeReport() entstanden ist. Entfernt
+ * dabei auch eine ggf. vorhandene Unterschrift, da diese sich sonst auf
+ * danach wieder änderbare Daten beziehen würde.
+ */
+export async function unlockReport(id: ID): Promise<ServiceReport | undefined> {
   return withReportTransaction(id, (report) => {
     report.signatureBlob = undefined;
     report.signatureWidth = undefined;
     report.signatureHeight = undefined;
     report.signedByName = undefined;
     report.signedAt = undefined;
+    report.finalizedAt = undefined;
     report.updatedAt = new Date().toISOString();
+  });
+}
+
+/** Merkt den Zeitpunkt des letzten erfolgreichen Word-Exports/Downloads/Teilens vor. */
+export async function markReportExported(id: ID): Promise<ServiceReport | undefined> {
+  return withReportTransaction(id, (report) => {
+    const now = new Date().toISOString();
+    report.exportedAt = now;
+    report.updatedAt = now;
   });
 }
 

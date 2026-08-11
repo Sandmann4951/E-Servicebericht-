@@ -18,7 +18,7 @@
 <button type="button" class="card" onclick={open}>
   <div class="row">
     <span class="project">{report.projectNumber || 'Ohne Projektnummer'}</span>
-    <StatusBadge status={report.status} signed={!!report.signedAt} />
+    <StatusBadge status={report.status} signed={!!report.signedAt} locked={!!report.finalizedAt} />
   </div>
 
   {#if report.customer}
@@ -33,6 +33,9 @@
   </div>
 
   <div class="updated">Zuletzt geändert: {formatDateTimeDE(report.updatedAt)}</div>
+  {#if report.exportedAt}
+    <div class="exported">📤 Exportiert am {formatDateTimeDE(report.exportedAt)}</div>
+  {/if}
 </button>
 
 <style>
@@ -72,6 +75,12 @@
 
   .updated {
     margin-top: var(--space-1);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+
+  .exported {
+    margin-top: 2px;
     font-size: 0.75rem;
     color: var(--color-text-muted);
   }

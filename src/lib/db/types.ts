@@ -30,6 +30,19 @@ export interface ServiceReport {
   signedByName?: string;
   signedAt?: ISODateTime;
 
+  /**
+   * Der eigentliche "gesperrt"-Zeitstempel: wird gesetzt, sobald der Bericht
+   * final abgeschlossen wird - entweder automatisch beim Erfassen einer
+   * Kunden-Unterschrift (setReportSignature) oder manuell durch den Monteur
+   * ohne Unterschrift (finalizeReport), z.B. wenn keine Unterschrift nötig
+   * oder möglich ist. `signedAt` beschreibt nur zusätzlich, OB (und wie)
+   * unterschrieben wurde - für die Sperre selbst zählt allein `finalizedAt`.
+   */
+  finalizedAt?: ISODateTime;
+
+  /** Zeitpunkt des letzten erfolgreichen Word-Exports/Downloads/Teilens - für die "bereits eingereicht?"-Anzeige in der Übersicht. */
+  exportedAt?: ISODateTime;
+
   timeEntryCount: number;
   totalDurationMinutes: number;
   materialItemCount: number;

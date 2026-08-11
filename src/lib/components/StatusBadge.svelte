@@ -1,17 +1,27 @@
 <script lang="ts">
   import type { ReportStatus } from '../db/types';
 
-  // `signed` ist bewusst getrennt von `status` (statt eines dritten
-  // ReportStatus-Werts): unterschriebene Berichte sind in den Daten immer
-  // auch `completed` (siehe automatische Statusänderung beim Unterschreiben)
-  // - "Unterschrieben" ist hier nur eine genauere Anzeige desselben Zustands,
-  // kein eigener Datenbank-Status.
-  let { status, signed = false }: { status: ReportStatus; signed?: boolean } = $props();
+  // `signed`/`locked` sind bewusst getrennt von `status` (statt weiterer
+  // ReportStatus-Werte): gesperrte Berichte sind in den Daten immer auch
+  // `completed` (siehe finalizeReport()/setReportSignature()) -
+  // "Unterschrieben"/"Final abgeschlossen" sind hier nur genauere Anzeigen
+  // desselben Zustands, kein eigener Datenbank-Status. `signed` impliziert
+  // `locked`, wird hier aber trotzdem separat übergeben statt abgeleitet, um
+  // die Komponente nicht an die genaue Lock-Logik zu koppeln.
+  let { status, signed = false, locked = false }: { status: ReportStatus; signed?: boolean; locked?: boolean } =
+    $props();
 </script>
 
-<span class="badge" class:open={status === 'open'} class:completed={status === 'completed' && !signed} class:signed>
+<span
+  class="badge"
+  class:open={status === 'open'}
+  class:completed={status === 'completed' && !locked}
+  class:signed={signed || locked}
+>
   {#if signed}
     🔒 Unterschrieben
+  {:else if locked}
+    🔒 Final abgeschlossen
   {:else if status === 'open'}
     Offen
   {:else}

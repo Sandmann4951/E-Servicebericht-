@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import {
-  clearReportSignature,
   createReport,
   deleteReport,
+  finalizeReport,
   getReport,
   listReports,
+  markReportExported,
   setReportSignature,
+  unlockReport,
   updateReport
 } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
@@ -64,19 +66,32 @@ describe('reports repository', () => {
     expect(completedReports.map((r) => r.id)).toEqual([completed.id]);
   });
 
-  it('filtert Berichte nach "signed" (nur unterschriebene, unabhängig vom internen Status)', async () => {
-    const unsigned = await createReport({ projectNumber: 'UNSIGNED' });
+  it('filtert Berichte nach "locked" (unterschriebene UND manuell final abgeschlossene)', async () => {
+    const untouched = await createReport({ projectNumber: 'OPEN' });
     const signed = await createReport({ projectNumber: 'SIGNED' });
     await setReportSignature(signed.id, {
       blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
       width: 10,
       height: 10
     });
+    const finalized = await createReport({ projectNumber: 'FINALIZED' });
+    await finalizeReport(finalized.id);
 
-    const signedReports = await listReports('signed');
+    const lockedReports = await listReports('locked');
 
-    expect(signedReports.map((r) => r.id)).toEqual([signed.id]);
-    expect(signedReports.map((r) => r.id)).not.toContain(unsigned.id);
+    expect(lockedReports.map((r) => r.id).sort()).toEqual([finalized.id, signed.id].sort());
+    expect(lockedReports.map((r) => r.id)).not.toContain(untouched.id);
+  });
+
+  it('filtert Berichte nach "not-exported"', async () => {
+    const exported = await createReport({ projectNumber: 'EXPORTED' });
+    await markReportExported(exported.id);
+    const notExported = await createReport({ projectNumber: 'NOT-EXPORTED' });
+
+    const notExportedReports = await listReports('not-exported');
+
+    expect(notExportedReports.map((r) => r.id)).toEqual([notExported.id]);
+    expect(notExportedReports.map((r) => r.id)).not.toContain(exported.id);
   });
 
   it('aktualisiert Felder eines Berichts', async () => {
@@ -122,7 +137,7 @@ describe('reports repository', () => {
     expect(final?.totalDurationMinutes).toBe(120);
   });
 
-  it('speichert eine Kunden-Unterschrift', async () => {
+  it('speichert eine Kunden-Unterschrift und sperrt den Bericht dabei (finalizedAt)', async () => {
     const report = await createReport({ projectNumber: '1' });
     const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
 
@@ -133,6 +148,7 @@ describe('reports repository', () => {
     expect(updated?.signatureHeight).toBe(120);
     expect(updated?.signedByName).toBe('Herr Kunde');
     expect(updated?.signedAt).toBeTruthy();
+    expect(updated?.finalizedAt).toBeTruthy();
 
     // fake-indexeddb klont Blobs beim Schreiben/Lesen (structured clone) - nach
     // dem erneuten Laden ist es also eine neue Instanz mit gleichem Inhalt.
@@ -141,26 +157,54 @@ describe('reports repository', () => {
     expect(reloaded?.signedByName).toBe('Herr Kunde');
   });
 
-  it('entfernt eine gespeicherte Kunden-Unterschrift wieder', async () => {
+  it('schließt einen Bericht ohne Unterschrift final ab (finalizeReport)', async () => {
     const report = await createReport({ projectNumber: '1' });
-    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
-    await setReportSignature(report.id, { blob, width: 300, height: 120, signedByName: 'Herr Kunde' });
 
-    const cleared = await clearReportSignature(report.id);
+    const finalized = await finalizeReport(report.id);
 
-    expect(cleared?.signatureBlob).toBeUndefined();
-    expect(cleared?.signatureWidth).toBeUndefined();
-    expect(cleared?.signatureHeight).toBeUndefined();
-    expect(cleared?.signedByName).toBeUndefined();
-    expect(cleared?.signedAt).toBeUndefined();
-
-    const reloaded = await getReport(report.id);
-    expect(reloaded?.signatureBlob).toBeUndefined();
+    expect(finalized?.status).toBe('completed');
+    expect(finalized?.finalizedAt).toBeTruthy();
+    expect(finalized?.signedAt).toBeUndefined();
+    expect(finalized?.signatureBlob).toBeUndefined();
   });
 
-  it('liefert undefined bei setReportSignature/clearReportSignature für nicht existierenden Bericht', async () => {
+  it('hebt die Sperre wieder auf (unlockReport) - egal ob durch Unterschrift oder finalizeReport entstanden', async () => {
+    const signedReport = await createReport({ projectNumber: '1' });
+    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
+    await setReportSignature(signedReport.id, { blob, width: 300, height: 120, signedByName: 'Herr Kunde' });
+
+    const unlockedSigned = await unlockReport(signedReport.id);
+    expect(unlockedSigned?.signatureBlob).toBeUndefined();
+    expect(unlockedSigned?.signatureWidth).toBeUndefined();
+    expect(unlockedSigned?.signatureHeight).toBeUndefined();
+    expect(unlockedSigned?.signedByName).toBeUndefined();
+    expect(unlockedSigned?.signedAt).toBeUndefined();
+    expect(unlockedSigned?.finalizedAt).toBeUndefined();
+
+    const finalizedReport = await createReport({ projectNumber: '2' });
+    await finalizeReport(finalizedReport.id);
+    const unlockedFinalized = await unlockReport(finalizedReport.id);
+    expect(unlockedFinalized?.finalizedAt).toBeUndefined();
+
+    const reloaded = await getReport(signedReport.id);
+    expect(reloaded?.signatureBlob).toBeUndefined();
+    expect(reloaded?.finalizedAt).toBeUndefined();
+  });
+
+  it('merkt den Export-Zeitpunkt vor (markReportExported)', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    expect(report.exportedAt).toBeUndefined();
+
+    const exported = await markReportExported(report.id);
+
+    expect(exported?.exportedAt).toBeTruthy();
+  });
+
+  it('liefert undefined bei setReportSignature/finalizeReport/unlockReport/markReportExported für nicht existierenden Bericht', async () => {
     const blob = new Blob([new Uint8Array([1])], { type: 'image/png' });
     expect(await setReportSignature('does-not-exist', { blob, width: 10, height: 10 })).toBeUndefined();
-    expect(await clearReportSignature('does-not-exist')).toBeUndefined();
+    expect(await finalizeReport('does-not-exist')).toBeUndefined();
+    expect(await unlockReport('does-not-exist')).toBeUndefined();
+    expect(await markReportExported('does-not-exist')).toBeUndefined();
   });
 });

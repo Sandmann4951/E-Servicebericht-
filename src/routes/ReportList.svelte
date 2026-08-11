@@ -145,8 +145,11 @@
     <button type="button" class:active={filter === 'completed'} onclick={() => (filter = 'completed')}>
       Abgeschlossen
     </button>
-    <button type="button" class:active={filter === 'signed'} onclick={() => (filter = 'signed')}>
-      Unterschrieben
+    <button type="button" class:active={filter === 'locked'} onclick={() => (filter = 'locked')}>
+      Gesperrt
+    </button>
+    <button type="button" class:active={filter === 'not-exported'} onclick={() => (filter = 'not-exported')}>
+      Nicht exportiert
     </button>
   </div>
 
