@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { addTimeEntry, deleteTimeEntry, listTimeEntries, updateTimeEntry } from '../db/timeEntries';
+  import { addTimeEntry, deleteTimeEntry, findOverlappingTimeEntries, listTimeEntries, updateTimeEntry } from '../db/timeEntries';
+  import { getReport } from '../db/reports';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
 
@@ -51,19 +52,56 @@
     showForm = true;
   }
 
-  async function save(): Promise<void> {
-    if (!formDate) return;
-    const payload = {
-      date: formDate,
-      startTime: formStart || undefined,
-      endTime: formEnd || undefined,
-      note: formNote
-    };
+  /** Eine Zeile pro überschneidendem Eintrag, mit Projektnummer statt Berichts-ID. */
+  async function describeOverlaps(overlaps: TimeEntry[]): Promise<string> {
+    const lines = await Promise.all(
+      overlaps.map(async (entry) => {
+        const report = await getReport(entry.reportId);
+        return `• "${report?.projectNumber ?? 'unbekannter Bericht'}" ${entry.startTime}–${entry.endTime} Uhr`;
+      })
+    );
+    return lines.join('\n');
+  }
+
+  async function persistEntry(payload: { date: string; startTime?: string; endTime?: string; note: string }): Promise<void> {
     if (editingId) {
       await updateTimeEntry(editingId, payload);
     } else {
       await addTimeEntry(reportId, payload);
     }
+  }
+
+  async function save(): Promise<void> {
+    if (!formDate) return;
+    const startTime = formStart || undefined;
+    const endTime = formEnd || undefined;
+    const payload = { date: formDate, startTime, endTime, note: formNote };
+
+    // Plausibilitätsprüfung nur möglich, wenn Start UND Ende gesetzt sind -
+    // sonst gibt es keine vergleichbare Zeitspanne. Prüft berichtsübergreifend
+    // (man kann nicht gleichzeitig in zwei Berichten arbeiten), schließt den
+    // gerade bearbeiteten Eintrag selbst aus.
+    if (startTime && endTime) {
+      const overlaps = await findOverlappingTimeEntries(formDate, startTime, endTime, editingId);
+      if (overlaps.length > 0) {
+        const list = await describeOverlaps(overlaps);
+        if (!confirm(`Diese Zeit überschneidet sich mit:\n${list}\n\nTrotzdem so speichern?`)) return;
+
+        await persistEntry(payload);
+
+        if (confirm(`Sollen die sich überschneidenden Einträge jetzt entfernt werden?\n${list}`)) {
+          for (const entry of overlaps) {
+            await deleteTimeEntry(entry.id);
+          }
+        }
+        resetForm();
+        await load();
+        onChanged();
+        return;
+      }
+    }
+
+    await persistEntry(payload);
     resetForm();
     await load();
     onChanged();

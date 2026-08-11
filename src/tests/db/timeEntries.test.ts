@@ -4,6 +4,7 @@ import { createReport, getReport } from '../../lib/db/reports';
 import {
   addTimeEntry,
   deleteTimeEntry,
+  findOverlappingTimeEntries,
   getActiveTimeEntry,
   getGloballyActiveTimeEntry,
   listTimeEntries,
@@ -124,5 +125,58 @@ describe('getGloballyActiveTimeEntry (nur eine Stempel-Session gleichzeitig)', (
     await updateTimeEntry(entry.id, { endTime: '16:00' });
 
     expect(await getGloballyActiveTimeEntry()).toBeUndefined();
+  });
+});
+
+describe('findOverlappingTimeEntries (Plausibilitätsprüfung)', () => {
+  it('findet eine echte Überschneidung', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const existing = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '12:00' });
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '10:00', '14:00');
+    expect(overlaps.map((e) => e.id)).toEqual([existing.id]);
+  });
+
+  it('findet Überschneidungen berichtsübergreifend', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    const entryA = await addTimeEntry(reportA.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+    const entryB = await addTimeEntry(reportB.id, { date: '2026-08-11', startTime: '09:00', endTime: '11:00' });
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:30', '09:30');
+    expect(overlaps.map((e) => e.id).sort()).toEqual([entryA.id, entryB.id].sort());
+  });
+
+  it('behandelt direkt aneinandergrenzende Zeiten NICHT als Überschneidung', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '10:00', '12:00');
+    expect(overlaps).toEqual([]);
+  });
+
+  it('ignoriert Einträge an anderen Tagen', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '12:00');
+    expect(overlaps).toEqual([]);
+  });
+
+  it('ignoriert Einträge ohne beide Zeiten (laufende Session, reiner Dauer-Eintrag)', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00' }); // noch eingestempelt
+    await addTimeEntry(report.id, { date: '2026-08-11', durationMinutes: 60 }); // nur manuelle Dauer
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '10:00');
+    expect(overlaps).toEqual([]);
+  });
+
+  it('schließt den per excludeEntryId angegebenen Eintrag aus (Bearbeiten ohne Selbstüberschneidung)', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+
+    const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '10:00', entry.id);
+    expect(overlaps).toEqual([]);
   });
 });

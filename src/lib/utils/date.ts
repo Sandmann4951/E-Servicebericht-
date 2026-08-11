@@ -20,7 +20,8 @@ export function nowHHmm(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
-function parseTimeToMinutes(value: string): number | undefined {
+/** Wandelt "HH:mm" in Minuten seit Mitternacht um, `undefined` bei ungültigem Format. */
+export function parseTimeToMinutes(value: string): number | undefined {
   const match = /^(\d{1,2}):(\d{2})$/.exec(value);
   if (!match) return undefined;
   const hours = Number(match[1]);

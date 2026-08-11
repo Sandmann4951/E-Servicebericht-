@@ -1,6 +1,6 @@
 import { getDB } from './client';
 import { recomputeReportSummary } from './summary';
-import { computeDurationMinutes } from '../utils/date';
+import { computeDurationMinutes, parseTimeToMinutes } from '../utils/date';
 import type { ID, TimeEntry } from './types';
 
 const ALL_STORES = ['timeEntries', 'materialItems', 'photos', 'reports'] as const;
@@ -61,6 +61,37 @@ export async function getGloballyActiveTimeEntry(): Promise<TimeEntry | undefine
     .filter((entry) => entry.startTime && !entry.endTime)
     .sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? '').localeCompare(b.startTime ?? ''));
   return open.at(-1);
+}
+
+/**
+ * Findet Zeiteinträge (berichtsübergreifend, am selben Tag), deren Zeitspanne
+ * sich mit [startTime, endTime) überschneidet - Plausibilitätsprüfung fürs
+ * nachträgliche manuelle Anpassen von Zeiten, da man ja nicht gleichzeitig an
+ * zwei Orten arbeiten kann. Einträge ohne beide Zeiten (z.B. eine laufende
+ * Stempel-Session oder ein reiner Dauer-Eintrag) werden ignoriert, da für sie
+ * keine vergleichbare Zeitspanne existiert. Direkt aneinandergrenzende
+ * Zeiten (Ende = Start des nächsten) gelten NICHT als Überschneidung.
+ */
+export async function findOverlappingTimeEntries(
+  date: string,
+  startTime: string,
+  endTime: string,
+  excludeEntryId?: ID
+): Promise<TimeEntry[]> {
+  const startMin = parseTimeToMinutes(startTime);
+  const endMin = parseTimeToMinutes(endTime);
+  if (startMin === undefined || endMin === undefined) return [];
+
+  const db = await getDB();
+  const sameDate = await db.getAllFromIndex('timeEntries', 'date', date);
+  return sameDate.filter((entry) => {
+    if (entry.id === excludeEntryId) return false;
+    if (!entry.startTime || !entry.endTime) return false;
+    const otherStart = parseTimeToMinutes(entry.startTime);
+    const otherEnd = parseTimeToMinutes(entry.endTime);
+    if (otherStart === undefined || otherEnd === undefined) return false;
+    return startMin < otherEnd && otherStart < endMin;
+  });
 }
 
 export async function addTimeEntry(reportId: ID, input: TimeEntryInput): Promise<TimeEntry> {
