@@ -3,6 +3,7 @@
   import { requestPersistentStorage } from './lib/db/client';
   import ReportList from './routes/ReportList.svelte';
   import ReportDetail from './routes/ReportDetail.svelte';
+  import Leerlaufzeiten from './routes/Leerlaufzeiten.svelte';
   import InstallHintBanner from './lib/components/InstallHintBanner.svelte';
   import UpdateAvailableToast from './lib/components/UpdateAvailableToast.svelte';
 
@@ -20,6 +21,8 @@
     {#key route.id}
       <ReportDetail id={route.id} />
     {/key}
+  {:else if route.name === 'leerlaufzeiten'}
+    <Leerlaufzeiten />
   {:else}
     <ReportList />
   {/if}

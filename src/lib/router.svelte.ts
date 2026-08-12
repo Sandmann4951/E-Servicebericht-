@@ -31,12 +31,15 @@ export function navigate(path: string, options: { replace?: boolean } = {}): voi
   }
 }
 
-export type Route = { name: 'list' } | { name: 'detail'; id: string };
+export type Route = { name: 'list' } | { name: 'detail'; id: string } | { name: 'leerlaufzeiten' };
 
 export function parseRoute(path: string): Route {
   const detailMatch = /^\/reports\/([^/]+)\/?$/.exec(path);
   if (detailMatch) {
     return { name: 'detail', id: decodeURIComponent(detailMatch[1]) };
+  }
+  if (/^\/leerlaufzeiten\/?$/.exec(path)) {
+    return { name: 'leerlaufzeiten' };
   }
   return { name: 'list' };
 }

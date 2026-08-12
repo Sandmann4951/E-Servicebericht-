@@ -4,6 +4,7 @@ import { createReport } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
 import { addMaterialItem } from '../../lib/db/materialItems';
 import { addPhoto } from '../../lib/db/photos';
+import { checkInWorkDay, checkOutWorkDay } from '../../lib/db/workDays';
 import { getAllData } from '../../lib/db/backup';
 import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../../lib/backup/backupFile';
 
@@ -32,7 +33,13 @@ describe('buildBackupFile / parseBackupFile', () => {
     const file = new File([blob], 'backup.json', { type: 'application/json' });
     const { data, summary } = await parseBackupFile(file);
 
-    expect(summary).toEqual({ reportCount: 1, timeEntryCount: 1, materialItemCount: 1, photoCount: 1 });
+    expect(summary).toEqual({
+      reportCount: 1,
+      timeEntryCount: 1,
+      materialItemCount: 1,
+      photoCount: 1,
+      workDayCount: 0
+    });
     expect(data.reports[0].projectNumber).toBe('2026-001');
     expect(data.reports[0].projectDescription).toBe('Test');
 
@@ -73,6 +80,49 @@ describe('buildBackupFile / parseBackupFile', () => {
     const all = await getAllData();
     expect(all.reports).toHaveLength(1);
     expect(all.reports[0].projectNumber).toBe('V1');
+  });
+
+  it('sichert und stellt den workDays-Store (Tagesstempeluhr) im Rundlauf mit wieder her', async () => {
+    const day = await checkInWorkDay();
+    await checkOutWorkDay(day.id);
+
+    const blob = await buildBackupFile();
+    const file = new File([blob], 'backup.json', { type: 'application/json' });
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.workDayCount).toBe(1);
+    expect(data.workDays).toHaveLength(1);
+    expect(data.workDays[0].id).toBe(day.id);
+    expect(data.workDays[0].checkOutTime).toBeTruthy();
+
+    await resetTestDB();
+    await restoreBackup(data);
+
+    const restored = await getAllData();
+    expect(restored.workDays).toHaveLength(1);
+    expect(restored.workDays[0].id).toBe(day.id);
+  });
+
+  it('liest eine v1-Sicherungsdatei ohne workDays-Feld weiterhin klaglos ein (workDays bleibt leer)', async () => {
+    const report = await createReport({ projectNumber: 'ALT' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '09:00' });
+
+    // Simuliert eine ältere v1-Sicherung: kein "workDays"-Feld im JSON.
+    const v1Backup = {
+      format: 'e-servicebericht-backup-v1',
+      exportedAt: new Date().toISOString(),
+      reports: (await getAllData()).reports,
+      timeEntries: (await getAllData()).timeEntries,
+      materialItems: [],
+      photos: []
+    };
+    const file = new File([JSON.stringify(v1Backup)], 'v1.json', { type: 'application/json' });
+
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.workDayCount).toBe(0);
+    expect(data.workDays).toEqual([]);
+    expect(data.reports).toHaveLength(1);
   });
 
   it('lehnt eine ungültige Datei ab', async () => {

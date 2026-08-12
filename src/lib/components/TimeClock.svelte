@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getActiveTimeEntry, updateTimeEntry } from '../db/timeEntries';
   import type { TimeEntry } from '../db/types';
-  import { clockInToReport } from '../clockActions';
+  import { switchToIdle, switchToProject } from '../clockActions';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
@@ -42,7 +42,7 @@
     if (busy || activeEntry || locked) return;
     busy = true;
     try {
-      if (!(await clockInToReport(reportId))) return;
+      if (!(await switchToProject(reportId))) return;
       await load();
       onChanged();
     } finally {
@@ -54,7 +54,14 @@
     if (busy || !activeEntry || locked) return;
     busy = true;
     try {
-      await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
+      if (activeEntry.workDayId) {
+        // Über die Tagesstempeluhr erfasst - Leerlaufzeit läuft weiter, statt
+        // einfach nur zu schließen (Tag ist ja weiterhin aktiv).
+        await switchToIdle();
+      } else {
+        // Alt-Eintrag ohne Tagesstempel-Verknüpfung - einfach schließen.
+        await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
+      }
       await load();
       onChanged();
     } finally {

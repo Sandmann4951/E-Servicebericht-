@@ -10,21 +10,37 @@ let dbPromise: Promise<IDBPDatabase<ServiceBerichtDB>> | undefined;
 export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
   if (!dbPromise) {
     dbPromise = openDB<ServiceBerichtDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const reports = db.createObjectStore('reports', { keyPath: 'id' });
-        reports.createIndex('projectNumber', 'projectNumber');
-        reports.createIndex('status', 'status');
-        reports.createIndex('updatedAt', 'updatedAt');
+      // `oldVersion`-gegated, damit bestehende Nutzer-Datenbanken (aktuell
+      // v1) sauber hochgezogen werden, statt beim Anlegen bereits
+      // existierender Stores zu scheitern oder Daten zu verlieren.
+      upgrade(db, oldVersion, _newVersion, transaction) {
+        if (oldVersion < 1) {
+          const reports = db.createObjectStore('reports', { keyPath: 'id' });
+          reports.createIndex('projectNumber', 'projectNumber');
+          reports.createIndex('status', 'status');
+          reports.createIndex('updatedAt', 'updatedAt');
 
-        const timeEntries = db.createObjectStore('timeEntries', { keyPath: 'id' });
-        timeEntries.createIndex('reportId', 'reportId');
-        timeEntries.createIndex('date', 'date');
+          const timeEntries = db.createObjectStore('timeEntries', { keyPath: 'id' });
+          timeEntries.createIndex('reportId', 'reportId');
+          timeEntries.createIndex('date', 'date');
 
-        const materialItems = db.createObjectStore('materialItems', { keyPath: 'id' });
-        materialItems.createIndex('reportId', 'reportId');
+          const materialItems = db.createObjectStore('materialItems', { keyPath: 'id' });
+          materialItems.createIndex('reportId', 'reportId');
 
-        const photos = db.createObjectStore('photos', { keyPath: 'id' });
-        photos.createIndex('reportId', 'reportId');
+          const photos = db.createObjectStore('photos', { keyPath: 'id' });
+          photos.createIndex('reportId', 'reportId');
+        }
+        if (oldVersion < 2) {
+          // Tagesstempeluhr: neuer Store für den Tagesstempel + Index, um
+          // alle Zeiteinträge (Projekt- und Leerlaufzeit-Abschnitte) eines
+          // Tages abzufragen. Ein Index auf einem bereits existierenden
+          // Store lässt sich nur über die Upgrade-`transaction` anlegen,
+          // nicht über db.createObjectStore().
+          const workDays = db.createObjectStore('workDays', { keyPath: 'id' });
+          workDays.createIndex('date', 'date');
+
+          transaction.objectStore('timeEntries').createIndex('workDayId', 'workDayId');
+        }
       }
     });
   }

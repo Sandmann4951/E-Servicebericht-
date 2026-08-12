@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { createReport, getGloballyActiveTimeEntry, getReport, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
-  import { clockInToReport } from '../lib/clockActions';
-  import { getTechnicianName } from '../lib/settings';
+  import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import { navigate } from '../lib/router.svelte';
 
@@ -12,7 +11,6 @@
   let loading = $state(true);
   let backupBusy = $state(false);
   let backupError = $state('');
-  let quickClockInBusy = $state(false);
   let fileInput: HTMLInputElement | undefined;
 
   // Reine Client-seitige Textsuche über die bereits geladene (nach Status
@@ -26,13 +24,6 @@
     );
   });
 
-  interface ActiveSession {
-    reportId: string;
-    projectNumber: string;
-    startTime: string;
-  }
-  let activeSession = $state<ActiveSession | undefined>(undefined);
-
   async function loadReports(): Promise<void> {
     loading = true;
     reports = await listReports(filter);
@@ -44,46 +35,8 @@
     loadReports();
   });
 
-  // Läuft einmal beim Mount - reicht aus, da diese Komponente bei jedem
-  // Zurücknavigieren zur Liste (kein {#key}-Wrapper in App.svelte) ohnehin
-  // frisch gemountet wird und so den aktuellen Stand neu abfragt.
-  $effect(() => {
-    getGloballyActiveTimeEntry().then(async (entry) => {
-      if (!entry?.startTime) {
-        activeSession = undefined;
-        return;
-      }
-      const report = await getReport(entry.reportId);
-      activeSession = report
-        ? { reportId: report.id, projectNumber: report.projectNumber, startTime: entry.startTime }
-        : undefined;
-    });
-  });
-
   function newReport(): void {
     navigate('/reports/new');
-  }
-
-  /**
-   * Schnellzugriff für den häufigsten Fall: beim Kunden ankommen und sofort
-   * loslegen, ohne erst alle Kopfdaten auszufüllen. Fragt nur die
-   * Projektnummer ab (per prompt() - passt zu den bereits genutzten nativen
-   * Bestätigungsdialogen in der App, kein eigenes Formular nötig), legt den
-   * Bericht an und stempelt direkt ein; Kopfdaten lassen sich im Bericht
-   * selbst jederzeit nachtragen.
-   */
-  async function quickClockIn(): Promise<void> {
-    if (quickClockInBusy) return;
-    const projectNumber = prompt('Projektnummer für den neuen Bericht:');
-    if (!projectNumber?.trim()) return;
-    quickClockInBusy = true;
-    try {
-      const report = await createReport({ projectNumber: projectNumber.trim(), technicianName: getTechnicianName() || undefined });
-      await clockInToReport(report.id);
-      navigate(`/reports/${report.id}`);
-    } finally {
-      quickClockInBusy = false;
-    }
   }
 
   async function exportBackup(): Promise<void> {
@@ -152,6 +105,7 @@
   <header class="header">
     <h1>Serviceberichte</h1>
     <div class="backup-actions">
+      <button type="button" onclick={() => navigate('/leerlaufzeiten')} aria-label="Leerlaufzeiten zuordnen">⏱️</button>
       <button type="button" onclick={exportBackup} disabled={backupBusy} aria-label="Sicherung exportieren">💾</button>
       <button type="button" onclick={triggerImport} disabled={backupBusy} aria-label="Sicherung wiederherstellen">
         📥
@@ -169,16 +123,7 @@
     <p class="backup-error">{backupError}</p>
   {/if}
 
-  {#if activeSession}
-    <button type="button" class="active-session" onclick={() => navigate(`/reports/${activeSession?.reportId}`)}>
-      <span class="dot"></span>
-      Eingestempelt in „{activeSession.projectNumber}“ seit {activeSession.startTime}
-    </button>
-  {:else}
-    <button type="button" class="quick-clock-in" onclick={quickClockIn} disabled={quickClockInBusy}>
-      ▶️ Direkt einstempeln
-    </button>
-  {/if}
+  <DayClock />
 
   <input
     type="search"
@@ -272,47 +217,6 @@
     text-align: center;
   }
 
-  .active-session {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin: 0 var(--space-4) var(--space-3);
-    background: var(--color-open-bg);
-    color: var(--color-open);
-    border: none;
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    font-weight: 600;
-    font-size: 0.9rem;
-    text-align: left;
-  }
-
-  .active-session .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--color-open);
-    flex-shrink: 0;
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  .quick-clock-in {
-    display: block;
-    width: calc(100% - 2 * var(--space-4));
-    margin: 0 var(--space-4) var(--space-3);
-    background: var(--color-success);
-    color: var(--color-primary-contrast);
-    border: none;
-    border-radius: var(--radius-md);
-    padding: var(--space-3) var(--space-4);
-    font-weight: 700;
-    text-align: center;
-  }
-
-  .quick-clock-in:disabled {
-    opacity: 0.6;
-  }
-
   .search {
     display: block;
     width: calc(100% - 2 * var(--space-4));
@@ -323,16 +227,6 @@
     padding: var(--space-3) var(--space-4);
     font-size: 0.95rem;
     color: var(--color-text);
-  }
-
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.4;
-    }
   }
 
   .filters {

@@ -72,6 +72,60 @@ describe('timeEntries repository', () => {
   });
 });
 
+describe('Leerlaufzeit-Einträge (reportId === undefined)', () => {
+  it('addTimeEntry(undefined, …) rührt keine Report-Summary an und taucht in keiner Report-Liste auf', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '09:00' });
+
+    const idle = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '09:00', endTime: '09:30' });
+
+    expect(idle.reportId).toBeUndefined();
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.timeEntryCount).toBe(1);
+    expect(updatedReport?.totalDurationMinutes).toBe(60);
+    expect(await listTimeEntries(report.id)).toHaveLength(1);
+  });
+
+  it('updateTimeEntry mit reportId-Wechsel aktualisiert alten UND neuen Bericht korrekt', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    const entry = await addTimeEntry(reportA.id, { date: '2026-08-10', startTime: '08:00', endTime: '09:00' });
+
+    await updateTimeEntry(entry.id, { reportId: reportB.id });
+
+    const updatedA = await getReport(reportA.id);
+    const updatedB = await getReport(reportB.id);
+    expect(updatedA?.timeEntryCount).toBe(0);
+    expect(updatedA?.totalDurationMinutes).toBe(0);
+    expect(updatedB?.timeEntryCount).toBe(1);
+    expect(updatedB?.totalDurationMinutes).toBe(60);
+  });
+
+  it('updateTimeEntry ordnet einen Leerlaufzeit-Eintrag einem Bericht zu und aktualisiert dessen Summary', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const idle = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '08:45' });
+
+    const updated = await updateTimeEntry(idle.id, { reportId: report.id });
+
+    expect(updated?.reportId).toBe(report.id);
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.timeEntryCount).toBe(1);
+    expect(updatedReport?.totalDurationMinutes).toBe(45);
+  });
+
+  it('deleteTimeEntry eines Leerlaufzeit-Eintrags rührt keine Report-Summary an', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '09:00' });
+    const idle = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '09:00', endTime: '09:30' });
+
+    await deleteTimeEntry(idle.id);
+
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.timeEntryCount).toBe(1);
+    expect(updatedReport?.totalDurationMinutes).toBe(60);
+  });
+});
+
 describe('getActiveTimeEntry (Ein-/Ausstempeln)', () => {
   it('liefert undefined ohne laufenden Eintrag', async () => {
     const report = await createReport({ projectNumber: '1' });

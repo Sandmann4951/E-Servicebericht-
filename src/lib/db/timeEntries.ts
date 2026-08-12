@@ -12,6 +12,8 @@ export interface TimeEntryInput {
   /** Nur relevant, wenn startTime/endTime nicht beide gesetzt sind (manuelle Dauer). */
   durationMinutes?: number;
   note?: string;
+  /** Nur von der Tagesstempeluhr gesetzt (checkInDay/switchToProject/switchToIdle), nie bei manuellen Einträgen. */
+  workDayId?: ID;
 }
 
 /**
@@ -35,6 +37,28 @@ export async function listTimeEntries(reportId: ID): Promise<TimeEntry[]> {
   return entries.sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 }
 
+/** Alle Zeiteinträge (Projekt- und Leerlaufzeit-Abschnitte) eines Tagesstempels, sortiert nach Startzeit. */
+export async function listTimeEntriesForWorkDay(workDayId: ID): Promise<TimeEntry[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'workDayId', workDayId);
+  return entries.sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
+}
+
+/**
+ * Alle abgeschlossenen (mit endTime), noch keinem Projekt zugeordneten
+ * Leerlaufzeit-Einträge - für die nachträgliche Zuordnung. Die aktuell noch
+ * laufende Leerlaufzeit (falls vorhanden) wird bewusst ausgeschlossen, da sie
+ * über die normale Ein-/Auscheck-Logik behandelt wird, nicht über eine
+ * nachträgliche Zuordnung.
+ */
+export async function listUnassignedIdleEntries(): Promise<TimeEntry[]> {
+  const db = await getDB();
+  const all = await db.getAll('timeEntries');
+  return all
+    .filter((entry) => !entry.reportId && entry.endTime)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.startTime ?? '').localeCompare(a.startTime ?? ''));
+}
+
 /**
  * Der aktuell "laufende" Zeiteintrag eines Berichts fürs Ein-/Ausstempeln -
  * also ein Eintrag mit gesetzter Startzeit, aber noch ohne Endzeit. Es sollte
@@ -48,11 +72,11 @@ export async function getActiveTimeEntry(reportId: ID): Promise<TimeEntry | unde
 }
 
 /**
- * Der aktuell laufende Zeiteintrag über ALLE Berichte hinweg (unabhängig
- * davon, in welchem Bericht man sich gerade befindet) - damit lässt sich
- * verhindern, dass man gleichzeitig in mehreren Berichten eingestempelt ist.
- * Es sollte höchstens einen geben; falls doch mehrere existieren, wird der
- * zuletzt begonnene zurückgegeben.
+ * Der aktuell laufende Zeiteintrag über ALLE Berichte (und Leerlaufzeit)
+ * hinweg - damit lässt sich verhindern, dass man gleichzeitig in mehreren
+ * Berichten eingestempelt ist. `reportId === undefined` bedeutet, dass
+ * gerade Leerlaufzeit läuft. Es sollte höchstens einen geben; falls doch
+ * mehrere existieren, wird der zuletzt begonnene zurückgegeben.
  */
 export async function getGloballyActiveTimeEntry(): Promise<TimeEntry | undefined> {
   const db = await getDB();
@@ -64,8 +88,9 @@ export async function getGloballyActiveTimeEntry(): Promise<TimeEntry | undefine
 }
 
 /**
- * Findet Zeiteinträge (berichtsübergreifend, am selben Tag), deren Zeitspanne
- * sich mit [startTime, endTime) überschneidet - Plausibilitätsprüfung fürs
+ * Findet Zeiteinträge (berichtsübergreifend, am selben Tag - schließt auch
+ * Leerlaufzeit-Einträge mit ein), deren Zeitspanne sich mit
+ * [startTime, endTime) überschneidet - Plausibilitätsprüfung fürs
  * nachträgliche manuelle Anpassen von Zeiten, da man ja nicht gleichzeitig an
  * zwei Orten arbeiten kann. Einträge ohne beide Zeiten (z.B. eine laufende
  * Stempel-Session oder ein reiner Dauer-Eintrag) werden ignoriert, da für sie
@@ -94,12 +119,18 @@ export async function findOverlappingTimeEntries(
   });
 }
 
-export async function addTimeEntry(reportId: ID, input: TimeEntryInput): Promise<TimeEntry> {
+/**
+ * `reportId` ist optional: `undefined` legt einen Leerlaufzeit-Eintrag an
+ * (eingestempelt, aber keinem Projekt zugeordnet) - dann wird auch keine
+ * Report-Summary neu berechnet, da der Eintrag zu keinem Bericht gehört.
+ */
+export async function addTimeEntry(reportId: ID | undefined, input: TimeEntryInput): Promise<TimeEntry> {
   const db = await getDB();
   const now = new Date().toISOString();
   const entry: TimeEntry = {
     id: crypto.randomUUID(),
     reportId,
+    workDayId: input.workDayId,
     date: input.date,
     startTime: input.startTime || undefined,
     endTime: input.endTime || undefined,
@@ -112,12 +143,15 @@ export async function addTimeEntry(reportId: ID, input: TimeEntryInput): Promise
 
   const tx = db.transaction(ALL_STORES, 'readwrite');
   await tx.objectStore('timeEntries').put(entry);
-  await recomputeReportSummary(tx, reportId, now);
+  if (reportId) await recomputeReportSummary(tx, reportId, now);
   await tx.done;
   return entry;
 }
 
-export async function updateTimeEntry(id: ID, patch: Partial<TimeEntryInput>): Promise<TimeEntry | undefined> {
+export async function updateTimeEntry(
+  id: ID,
+  patch: Partial<TimeEntryInput> & { reportId?: ID }
+): Promise<TimeEntry | undefined> {
   const db = await getDB();
   const tx = db.transaction(ALL_STORES, 'readwrite');
   const store = tx.objectStore('timeEntries');
@@ -127,6 +161,7 @@ export async function updateTimeEntry(id: ID, patch: Partial<TimeEntryInput>): P
     return undefined;
   }
 
+  const previousReportId = entry.reportId;
   const merged: TimeEntry = {
     ...entry,
     ...patch,
@@ -136,7 +171,16 @@ export async function updateTimeEntry(id: ID, patch: Partial<TimeEntryInput>): P
   merged.durationMinutes = resolveDuration(merged);
 
   await store.put(merged);
-  await recomputeReportSummary(tx, entry.reportId, merged.updatedAt);
+  // Ändert sich die reportId (z.B. beim nachträglichen Zuordnen eines
+  // Leerlaufzeit-Eintrags zu einem Projekt), müssen sowohl der alte als auch
+  // der neue Bericht ihre Summary neu berechnen - beide können undefined
+  // sein (Leerlaufzeit), dann entfällt der jeweilige Aufruf.
+  if (previousReportId && previousReportId !== merged.reportId) {
+    await recomputeReportSummary(tx, previousReportId, merged.updatedAt);
+  }
+  if (merged.reportId) {
+    await recomputeReportSummary(tx, merged.reportId, merged.updatedAt);
+  }
   await tx.done;
   return merged;
 }
@@ -151,6 +195,6 @@ export async function deleteTimeEntry(id: ID): Promise<void> {
     return;
   }
   await store.delete(id);
-  await recomputeReportSummary(tx, entry.reportId);
+  if (entry.reportId) await recomputeReportSummary(tx, entry.reportId);
   await tx.done;
 }

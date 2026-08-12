@@ -1,85 +1,206 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from './testUtils';
-import { clockInToReport } from '../lib/clockActions';
-import { createReport } from '../lib/db/reports';
-import { getActiveTimeEntry, getGloballyActiveTimeEntry, listTimeEntries } from '../lib/db/timeEntries';
+import { checkInDay, checkOutDay, reassignIdleEntry, switchToIdle, switchToProject } from '../lib/clockActions';
+import { createReport, finalizeReport, getReport } from '../lib/db/reports';
+import {
+  addTimeEntry,
+  getGloballyActiveTimeEntry,
+  listTimeEntries,
+  listTimeEntriesForWorkDay,
+  listUnassignedIdleEntries
+} from '../lib/db/timeEntries';
+import { checkInWorkDay, getActiveWorkDay } from '../lib/db/workDays';
+import { todayISODate } from '../lib/utils/date';
 
 beforeEach(async () => {
   await resetTestDB();
 });
 
-describe('clockInToReport', () => {
-  it('stempelt ohne Rückfrage ein, wenn nirgends sonst eine Session läuft', async () => {
-    const report = await createReport({ projectNumber: 'A' });
+describe('checkInDay', () => {
+  it('startet den Tag und öffnet sofort einen Leerlaufzeit-Eintrag', async () => {
+    const day = await checkInDay();
 
-    const result = await clockInToReport(report.id);
-
-    expect(result).toBe(true);
-    const active = await getActiveTimeEntry(report.id);
-    expect(active?.startTime).toBeTruthy();
+    expect(day.checkInTime).toBeTruthy();
+    expect(day.checkOutTime).toBeUndefined();
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.workDayId).toBe(day.id);
+    expect(active?.reportId).toBeUndefined();
   });
 
-  it('beendet nach Bestätigung eine anderswo laufende Session und stempelt hier neu ein', async () => {
-    const other = await createReport({ projectNumber: 'OTHER' });
-    await clockInToReport(other.id);
+  it('ist idempotent, wenn bereits ein Tag läuft', async () => {
+    const day1 = await checkInDay();
+    const day2 = await checkInDay();
 
-    const target = await createReport({ projectNumber: 'TARGET' });
+    expect(day2.id).toBe(day1.id);
+    const entries = await listTimeEntriesForWorkDay(day1.id);
+    expect(entries).toHaveLength(1);
+  });
+});
+
+describe('switchToProject', () => {
+  it('startet transparent den Tag, wenn noch keiner läuft ("Direkt einstempeln")', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+
+    const result = await switchToProject(report.id);
+
+    expect(result).toBe(true);
+    const day = await getActiveWorkDay();
+    expect(day).toBeTruthy();
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.reportId).toBe(report.id);
+    expect(active?.workDayId).toBe(day?.id);
+  });
+
+  it('verweigert den Wechsel in einen gesperrten Bericht', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await finalizeReport(report.id);
+
+    const result = await switchToProject(report.id);
+
+    expect(result).toBe(false);
+    expect(await getActiveWorkDay()).toBeUndefined();
+  });
+
+  it('fragt beim Wechsel von Leerlaufzeit in ein Projekt nicht nach', async () => {
+    await checkInDay();
+    const report = await createReport({ projectNumber: 'A' });
     const confirmSpy = vi.fn(() => true);
     vi.stubGlobal('confirm', confirmSpy);
 
-    const result = await clockInToReport(target.id);
+    const result = await switchToProject(report.id);
 
-    expect(confirmSpy).toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
     expect(result).toBe(true);
-    // getActiveTimeEntry() liefert nur NOCH laufende Einträge - der alte ist
-    // jetzt beendet (hat eine endTime) und taucht dort nicht mehr auf, muss
-    // also über listTimeEntries() geprüft werden.
-    const [otherEntry] = await listTimeEntries(other.id);
-    expect(otherEntry?.endTime).toBeTruthy();
-    expect((await getActiveTimeEntry(target.id))?.startTime).toBeTruthy();
-
     vi.unstubAllGlobals();
   });
 
-  it('stempelt nicht ein, wenn die Rückfrage abgelehnt wird', async () => {
-    const other = await createReport({ projectNumber: 'OTHER' });
-    await clockInToReport(other.id);
+  it('fragt beim Wechsel zwischen zwei verschiedenen Projekten nach und wechselt bei Bestätigung', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    await switchToProject(reportA.id);
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirmSpy);
 
-    const target = await createReport({ projectNumber: 'TARGET' });
+    const result = await switchToProject(reportB.id);
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(result).toBe(true);
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.reportId).toBe(reportB.id);
+    vi.unstubAllGlobals();
+  });
+
+  it('bricht bei Ablehnung der Rückfrage ab und bleibt im alten Projekt', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    await switchToProject(reportA.id);
     vi.stubGlobal('confirm', vi.fn(() => false));
 
-    const result = await clockInToReport(target.id);
+    const result = await switchToProject(reportB.id);
 
     expect(result).toBe(false);
-    expect(await getActiveTimeEntry(target.id)).toBeUndefined();
-    // die andere Session läuft unverändert weiter
-    expect((await getActiveTimeEntry(other.id))?.endTime).toBeUndefined();
-
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.reportId).toBe(reportA.id);
     vi.unstubAllGlobals();
   });
 
   it('fragt nicht nach, wenn bereits im selben Bericht eingestempelt ist', async () => {
     const report = await createReport({ projectNumber: 'A' });
-    await clockInToReport(report.id);
+    await switchToProject(report.id);
     const confirmSpy = vi.fn(() => true);
     vi.stubGlobal('confirm', confirmSpy);
 
-    await clockInToReport(report.id);
+    await switchToProject(report.id);
 
     expect(confirmSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+});
 
-  it('lässt am Ende höchstens eine global aktive Session übrig', async () => {
-    const other = await createReport({ projectNumber: 'OTHER' });
-    await clockInToReport(other.id);
-    const target = await createReport({ projectNumber: 'TARGET' });
-    vi.stubGlobal('confirm', vi.fn(() => true));
+describe('switchToIdle', () => {
+  it('hat keinen Effekt, wenn kein Tag läuft', async () => {
+    await switchToIdle();
 
-    await clockInToReport(target.id);
+    expect(await getActiveWorkDay()).toBeUndefined();
+  });
 
-    const globallyActive = await getGloballyActiveTimeEntry();
-    expect(globallyActive?.reportId).toBe(target.id);
-    vi.unstubAllGlobals();
+  it('schließt den Projekt-Eintrag und öffnet Leerlaufzeit', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await switchToProject(report.id);
+    const activeBefore = await getGloballyActiveTimeEntry();
+
+    await switchToIdle();
+
+    const activeAfter = await getGloballyActiveTimeEntry();
+    expect(activeAfter?.reportId).toBeUndefined();
+    expect(activeAfter?.id).not.toBe(activeBefore?.id);
+    const [closed] = await listTimeEntries(report.id);
+    expect(closed?.endTime).toBeTruthy();
+  });
+});
+
+describe('checkOutDay', () => {
+  it('liefert undefined ohne aktiven Tag', async () => {
+    expect(await checkOutDay()).toBeUndefined();
+  });
+
+  it('schließt einen noch offenen Abschnitt beim Auschecken', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', workDayId: day.id });
+
+    const summary = await checkOutDay();
+
+    expect(summary?.workDay.checkOutTime).toBeTruthy();
+    const [entry] = await listTimeEntriesForWorkDay(day.id);
+    expect(entry?.endTime).toBeTruthy();
+  });
+
+  it('berechnet Gesamt-/Projekt-/Leerlaufzeit korrekt bei gemischten Abschnitten', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, {
+      date: todayISODate(),
+      startTime: '08:00',
+      endTime: '08:30',
+      workDayId: day.id
+    });
+    await addTimeEntry(report.id, {
+      date: todayISODate(),
+      startTime: '08:30',
+      endTime: '10:00',
+      workDayId: day.id
+    });
+    await addTimeEntry(undefined, {
+      date: todayISODate(),
+      startTime: '10:00',
+      endTime: '10:15',
+      workDayId: day.id
+    });
+
+    const summary = await checkOutDay();
+
+    expect(summary?.idleMinutes).toBe(45);
+    expect(summary?.projectMinutes).toBe(90);
+    expect(summary?.totalMinutes).toBe(135);
+  });
+});
+
+describe('reassignIdleEntry', () => {
+  it('ordnet einen Leerlaufzeit-Eintrag einem Bericht zu und aktualisiert dessen Summary', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    const entry = await addTimeEntry(undefined, {
+      date: todayISODate(),
+      startTime: '08:00',
+      endTime: '09:00',
+      workDayId: day.id
+    });
+
+    await reassignIdleEntry(entry.id, report.id);
+
+    const updated = await getReport(report.id);
+    expect(updated?.timeEntryCount).toBe(1);
+    expect(updated?.totalDurationMinutes).toBe(60);
+    expect(await listUnassignedIdleEntries()).toEqual([]);
   });
 });

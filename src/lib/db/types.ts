@@ -54,12 +54,39 @@ export interface ServiceReport {
 
 export interface TimeEntry {
   id: ID;
-  reportId: ID;
+  /**
+   * Optional seit der Tagesstempeluhr: `undefined` bedeutet Leerlaufzeit
+   * (eingestempelt, aber keinem Projekt zugeordnet). Manuell im Zeiten-Tab
+   * erfasste Einträge haben immer eine reportId, wie bisher.
+   */
+  reportId?: ID;
+  /**
+   * Verknüpfung zum Tagesstempel (WorkDay), der diesen Eintrag erzeugt hat -
+   * nur gesetzt für Einträge aus der Tagesstempeluhr (checkInDay/
+   * switchToProject/switchToIdle), NIE für manuell im Zeiten-Tab erfasste
+   * Einträge.
+   */
+  workDayId?: ID;
   date: ISODate;
   startTime?: string; // "HH:mm"
   endTime?: string; // "HH:mm"
   durationMinutes?: number;
   note?: string;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+/**
+ * Der Tagesstempel: unabhängig von einem konkreten Projekt, umschließt
+ * beliebig viele Projekt-/Leerlaufzeit-TimeEntry-Abschnitte (siehe
+ * TimeEntry.workDayId). Es kann global immer nur höchstens ein WorkDay ohne
+ * checkOutTime geben (durchgesetzt in der Action-Schicht, src/lib/clockActions.ts).
+ */
+export interface WorkDay {
+  id: ID;
+  date: ISODate; // lokales Datum beim Einstempeln
+  checkInTime?: string; // "HH:mm"
+  checkOutTime?: string; // "HH:mm" - undefined = Tag noch aktiv
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -96,7 +123,7 @@ export interface ServiceBerichtDB extends DBSchema {
   timeEntries: {
     key: ID;
     value: TimeEntry;
-    indexes: { reportId: string; date: string };
+    indexes: { reportId: string; date: string; workDayId: string };
   };
   materialItems: {
     key: ID;
@@ -108,7 +135,12 @@ export interface ServiceBerichtDB extends DBSchema {
     value: Photo;
     indexes: { reportId: string };
   };
+  workDays: {
+    key: ID;
+    value: WorkDay;
+    indexes: { date: string };
+  };
 }
 
 export const DB_NAME = 'e-servicebericht-db';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;

@@ -1,7 +1,11 @@
 import { getAllData, restoreAllData, type AllData } from '../db/backup';
 import type { Photo } from '../db/types';
 
-const BACKUP_FORMAT = 'e-servicebericht-backup-v1';
+// v2 fügt den workDays-Store hinzu (Tagesstempeluhr). Neue Sicherungen werden
+// immer mit v2 geschrieben; v1-Dateien (ohne workDays) lassen sich weiterhin
+// lesen - workDays fällt dabei einfach leer aus, kein Fehler.
+const BACKUP_FORMAT_V1 = 'e-servicebericht-backup-v1';
+const BACKUP_FORMAT_V2 = 'e-servicebericht-backup-v2';
 
 /** Foto-Datensatz mit den Blobs base64-kodiert statt als echte Blobs - JSON-tauglich. */
 type SerializedPhoto = Omit<Photo, 'blob' | 'thumbnailBlob'> & {
@@ -16,6 +20,8 @@ interface BackupFile {
   timeEntries: AllData['timeEntries'];
   materialItems: AllData['materialItems'];
   photos: SerializedPhoto[];
+  /** Erst ab v2 vorhanden - bei v1-Dateien schlicht nicht vorhanden. */
+  workDays?: AllData['workDays'];
 }
 
 /**
@@ -54,12 +60,13 @@ export async function buildBackupFile(): Promise<Blob> {
   );
 
   const backup: BackupFile = {
-    format: BACKUP_FORMAT,
+    format: BACKUP_FORMAT_V2,
     exportedAt: new Date().toISOString(),
     reports: data.reports,
     timeEntries: data.timeEntries,
     materialItems: data.materialItems,
-    photos
+    photos,
+    workDays: data.workDays
   };
   return new Blob([JSON.stringify(backup)], { type: 'application/json' });
 }
@@ -69,6 +76,7 @@ export interface BackupSummary {
   timeEntryCount: number;
   materialItemCount: number;
   photoCount: number;
+  workDayCount: number;
 }
 
 export interface ParsedBackup {
@@ -86,10 +94,11 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     throw new Error('Datei ist kein gültiges JSON.');
   }
 
+  const format = (json as Partial<BackupFile>).format;
   if (
     typeof json !== 'object' ||
     json === null ||
-    (json as Partial<BackupFile>).format !== BACKUP_FORMAT ||
+    (format !== BACKUP_FORMAT_V1 && format !== BACKUP_FORMAT_V2) ||
     !Array.isArray((json as Partial<BackupFile>).reports) ||
     !Array.isArray((json as Partial<BackupFile>).timeEntries) ||
     !Array.isArray((json as Partial<BackupFile>).materialItems) ||
@@ -109,7 +118,9 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     reports: backup.reports,
     timeEntries: backup.timeEntries,
     materialItems: backup.materialItems,
-    photos
+    photos,
+    // v1-Dateien haben keine workDays - dann bleibt es leer statt zu scheitern.
+    workDays: backup.workDays ?? []
   };
 
   return {
@@ -118,7 +129,8 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
       reportCount: data.reports.length,
       timeEntryCount: data.timeEntries.length,
       materialItemCount: data.materialItems.length,
-      photoCount: data.photos.length
+      photoCount: data.photos.length,
+      workDayCount: data.workDays.length
     }
   };
 }
