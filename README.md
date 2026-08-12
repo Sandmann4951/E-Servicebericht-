@@ -20,6 +20,10 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 - **Autosave** – kein Speichern-Button nötig, Eingaben werden automatisch gesichert
 - **Offlinefähig** – alle Daten liegen lokal auf dem Gerät (IndexedDB), keine Internetverbindung nötig
 - **Installierbar** – "Zum Home-Bildschirm hinzufügen" für App-artiges Verhalten auf iOS/Android
+- **Direkt einstempeln**: Button oben in der Berichtsliste legt mit nur der Projektnummer sofort einen neuen Bericht an und startet direkt die Stempeluhr – Kopfdaten lassen sich danach in Ruhe nachtragen. Für den häufigsten Fall (Ankunft beim Kunden, sofort loslegen) so mit minimalen Schritten möglich
+- **Techniker-Name wird gemerkt**: Der zuletzt eingetragene Techniker-Name wird lokal auf dem Gerät gemerkt und bei jedem neuen Bericht automatisch vorausgefüllt – erspart wiederholtes Eintippen
+- **Kopfdaten einklappbar**: Ein bereits angelegter Bericht zeigt Projektnummer/Kunde zunächst nur als kompakte, antippbare Kopfzeile – mehr Platz für Zeiten/Material/Fotos auf kleinen Bildschirmen; ein Tap klappt die vollen Kopfdaten bei Bedarf wieder auf
+- **Suche in der Berichtsliste**: Textsuche über Projektnummer und Kunde, zusätzlich zu den Status-Filtern
 
 Aktuell bewusst außerhalb des Umfangs: PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
 

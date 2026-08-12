@@ -1,15 +1,30 @@
 <script lang="ts">
-  import { getGloballyActiveTimeEntry, getReport, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { createReport, getGloballyActiveTimeEntry, getReport, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
+  import { clockInToReport } from '../lib/clockActions';
+  import { getTechnicianName } from '../lib/settings';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import { navigate } from '../lib/router.svelte';
 
   let reports = $state<ServiceReport[]>([]);
   let filter = $state<ReportFilter>('all');
+  let searchQuery = $state('');
   let loading = $state(true);
   let backupBusy = $state(false);
   let backupError = $state('');
+  let quickClockInBusy = $state(false);
   let fileInput: HTMLInputElement | undefined;
+
+  // Reine Client-seitige Textsuche über die bereits geladene (nach Status
+  // gefilterte) Liste - kein neuer DB-Index nötig, bei der zu erwartenden
+  // Berichtsanzahl eines Solo-Handwerkers völlig ausreichend performant.
+  const filteredReports = $derived.by(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return reports;
+    return reports.filter(
+      (report) => report.projectNumber.toLowerCase().includes(query) || (report.customer ?? '').toLowerCase().includes(query)
+    );
+  });
 
   interface ActiveSession {
     reportId: string;
@@ -47,6 +62,28 @@
 
   function newReport(): void {
     navigate('/reports/new');
+  }
+
+  /**
+   * Schnellzugriff für den häufigsten Fall: beim Kunden ankommen und sofort
+   * loslegen, ohne erst alle Kopfdaten auszufüllen. Fragt nur die
+   * Projektnummer ab (per prompt() - passt zu den bereits genutzten nativen
+   * Bestätigungsdialogen in der App, kein eigenes Formular nötig), legt den
+   * Bericht an und stempelt direkt ein; Kopfdaten lassen sich im Bericht
+   * selbst jederzeit nachtragen.
+   */
+  async function quickClockIn(): Promise<void> {
+    if (quickClockInBusy) return;
+    const projectNumber = prompt('Projektnummer für den neuen Bericht:');
+    if (!projectNumber?.trim()) return;
+    quickClockInBusy = true;
+    try {
+      const report = await createReport({ projectNumber: projectNumber.trim(), technicianName: getTechnicianName() || undefined });
+      await clockInToReport(report.id);
+      navigate(`/reports/${report.id}`);
+    } finally {
+      quickClockInBusy = false;
+    }
   }
 
   async function exportBackup(): Promise<void> {
@@ -137,7 +174,19 @@
       <span class="dot"></span>
       Eingestempelt in „{activeSession.projectNumber}“ seit {activeSession.startTime}
     </button>
+  {:else}
+    <button type="button" class="quick-clock-in" onclick={quickClockIn} disabled={quickClockInBusy}>
+      ▶️ Direkt einstempeln
+    </button>
   {/if}
+
+  <input
+    type="search"
+    class="search"
+    bind:value={searchQuery}
+    placeholder="Suchen (Projektnummer, Kunde)…"
+    aria-label="Berichte durchsuchen"
+  />
 
   <div class="filters" role="tablist" aria-label="Berichte filtern">
     <button type="button" class:active={filter === 'all'} onclick={() => (filter = 'all')}>Alle</button>
@@ -161,9 +210,13 @@
         <p>Noch keine Serviceberichte vorhanden.</p>
         <p class="hint">Tippe unten rechts auf „+“, um deinen ersten Bericht anzulegen.</p>
       </div>
+    {:else if filteredReports.length === 0}
+      <div class="empty">
+        <p>Keine Treffer für „{searchQuery}“.</p>
+      </div>
     {:else}
       <ul class="list">
-        {#each reports as report (report.id)}
+        {#each filteredReports as report (report.id)}
           <li><ReportCard {report} /></li>
         {/each}
       </ul>
@@ -241,6 +294,35 @@
     background: var(--color-open);
     flex-shrink: 0;
     animation: pulse 2s ease-in-out infinite;
+  }
+
+  .quick-clock-in {
+    display: block;
+    width: calc(100% - 2 * var(--space-4));
+    margin: 0 var(--space-4) var(--space-3);
+    background: var(--color-success);
+    color: var(--color-primary-contrast);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .quick-clock-in:disabled {
+    opacity: 0.6;
+  }
+
+  .search {
+    display: block;
+    width: calc(100% - 2 * var(--space-4));
+    margin: 0 var(--space-4) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    font-size: 0.95rem;
+    color: var(--color-text);
   }
 
   @keyframes pulse {

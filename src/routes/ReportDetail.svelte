@@ -14,6 +14,7 @@
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
   import { formatDurationMinutes, nowHHmm } from '../lib/utils/date';
+  import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
   import MaterialSection from '../lib/components/MaterialSection.svelte';
@@ -35,7 +36,10 @@
   let projectDescription = $state('');
   let customer = $state('');
   let contactPerson = $state('');
-  let technicianName = $state('');
+  // Bei einem neuen Bericht mit dem zuletzt verwendeten Techniker-Namen
+  // vorausfüllen (lokal auf dem Gerät gemerkt, siehe lib/settings.ts) - erspart
+  // erneutes Eintippen bei jedem einzelnen Bericht.
+  let technicianName = $state(isNewRoute ? getTechnicianName() : '');
   let notes = $state('');
   let status = $state<ReportStatus>('open');
 
@@ -56,6 +60,12 @@
   // Sperre bewusst wieder aufheben (unlockManually() bzw. "Entfernen" im
   // Unterschrift-Tab).
   const locked = $derived(!!finalizedAt);
+
+  // Kopfdaten sind bei einem neuen Bericht ausgeklappt (müssen ja erst
+  // ausgefüllt werden), bei einem bereits vorhandenen dagegen eingeklappt -
+  // spart auf kleinen Bildschirmen Platz für die eigentliche Arbeit
+  // (Zeiten/Material/Fotos). Per Tap auf die Kopfzeile jederzeit umschaltbar.
+  let fieldsExpanded = $state(isNewRoute);
 
   let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos' | 'unterschrift'>('übersicht');
   let savedPulseVisible = $state(false);
@@ -127,6 +137,12 @@
   function onFieldChange(): void {
     projectNumberMissing = false;
     scheduledSave.run();
+  }
+
+  /** Wie onFieldChange(), merkt sich den Techniker-Namen zusätzlich lokal als neuen Standard für künftige Berichte (siehe lib/settings.ts). */
+  function onTechnicianNameInput(): void {
+    onFieldChange();
+    setTechnicianName(technicianName);
   }
 
   function flushNow(): void {
@@ -403,6 +419,21 @@
           <button type="button" class="unlock" onclick={unlockManually}>🔓 Sperre aufheben</button>
         </div>
       {/if}
+      {#if reportId}
+        <button
+          type="button"
+          class="fields-toggle"
+          onclick={() => (fieldsExpanded = !fieldsExpanded)}
+          aria-expanded={fieldsExpanded}
+        >
+          <span class="fields-toggle-text">
+            <strong>{projectNumber || 'Ohne Projektnummer'}</strong>
+            {#if customer}<span class="fields-toggle-customer"> · {customer}</span>{/if}
+          </span>
+          <span class="chevron" class:open={fieldsExpanded}>▾</span>
+        </button>
+      {/if}
+      {#if !reportId || fieldsExpanded}
       <div class="fields">
         <label class:invalid={projectNumberMissing}>
           Projektnummer *
@@ -461,7 +492,7 @@
           <input
             type="text"
             bind:value={technicianName}
-            oninput={onFieldChange}
+            oninput={onTechnicianNameInput}
             onblur={flushNow}
             placeholder="Dein Name"
             disabled={locked}
@@ -494,6 +525,7 @@
           {/if}
         </div>
       </div>
+      {/if}
 
       <div class="tabs" role="tablist" aria-label="Bereich wählen">
         <button type="button" class:active={activeTab === 'übersicht'} onclick={() => (activeTab = 'übersicht')}>
@@ -669,6 +701,41 @@
     min-height: auto;
     font-weight: 600;
     font-size: 0.8rem;
+  }
+
+  .fields-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    width: 100%;
+    background: var(--color-surface);
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-4);
+    text-align: left;
+    min-height: auto;
+  }
+
+  .fields-toggle-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fields-toggle-customer {
+    color: var(--color-text-muted);
+    font-weight: 400;
+  }
+
+  .chevron {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    transition: transform 0.15s ease;
+  }
+
+  .chevron.open {
+    transform: rotate(180deg);
   }
 
   .fields {
