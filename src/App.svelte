@@ -4,6 +4,7 @@
   import ReportList from './routes/ReportList.svelte';
   import ReportDetail from './routes/ReportDetail.svelte';
   import Leerlaufzeiten from './routes/Leerlaufzeiten.svelte';
+  import Statistik from './routes/Statistik.svelte';
   import InstallHintBanner from './lib/components/InstallHintBanner.svelte';
   import UpdateAvailableToast from './lib/components/UpdateAvailableToast.svelte';
 
@@ -23,6 +24,8 @@
     {/key}
   {:else if route.name === 'leerlaufzeiten'}
     <Leerlaufzeiten />
+  {:else if route.name === 'statistik'}
+    <Statistik />
   {:else}
     <ReportList />
   {/if}

@@ -105,6 +105,7 @@
   <header class="header">
     <h1>Serviceberichte</h1>
     <div class="backup-actions">
+      <button type="button" onclick={() => navigate('/statistik')} aria-label="Statistik anzeigen">📊</button>
       <button type="button" onclick={() => navigate('/leerlaufzeiten')} aria-label="Leerlaufzeiten zuordnen">⏱️</button>
       <button type="button" onclick={exportBackup} disabled={backupBusy} aria-label="Sicherung exportieren">💾</button>
       <button type="button" onclick={triggerImport} disabled={backupBusy} aria-label="Sicherung wiederherstellen">

@@ -5,4 +5,5 @@ export * from './timeEntries';
 export * from './materialItems';
 export * from './photos';
 export * from './workDays';
+export * from './stats';
 export * from './backup';

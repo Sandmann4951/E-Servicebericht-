@@ -31,7 +31,11 @@ export function navigate(path: string, options: { replace?: boolean } = {}): voi
   }
 }
 
-export type Route = { name: 'list' } | { name: 'detail'; id: string } | { name: 'leerlaufzeiten' };
+export type Route =
+  | { name: 'list' }
+  | { name: 'detail'; id: string }
+  | { name: 'leerlaufzeiten' }
+  | { name: 'statistik' };
 
 export function parseRoute(path: string): Route {
   const detailMatch = /^\/reports\/([^/]+)\/?$/.exec(path);
@@ -40,6 +44,9 @@ export function parseRoute(path: string): Route {
   }
   if (/^\/leerlaufzeiten\/?$/.exec(path)) {
     return { name: 'leerlaufzeiten' };
+  }
+  if (/^\/statistik\/?$/.exec(path)) {
+    return { name: 'statistik' };
   }
   return { name: 'list' };
 }
