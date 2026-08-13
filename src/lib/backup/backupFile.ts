@@ -4,6 +4,12 @@ import type { Photo } from '../db/types';
 // v2 fügt den workDays-Store hinzu (Tagesstempeluhr). Neue Sicherungen werden
 // immer mit v2 geschrieben; v1-Dateien (ohne workDays) lassen sich weiterhin
 // lesen - workDays fällt dabei einfach leer aus, kein Fehler.
+//
+// Bewusst NICHT ans Rebranding zu "Rivo" angepasst: diese Strings landen als
+// internes Format-Tag in jeder erzeugten Sicherungsdatei. Ändert man sie,
+// würden bereits vorhandene Sicherungen (mit dem alten Tag) plötzlich als
+// "ungültig" abgelehnt. Nur reine Anzeige-Texte (Fehlermeldung, Dateiname)
+// wurden unten umbenannt, das unsichtbare Format-Tag bleibt stabil.
 const BACKUP_FORMAT_V1 = 'e-servicebericht-backup-v1';
 const BACKUP_FORMAT_V2 = 'e-servicebericht-backup-v2';
 
@@ -104,7 +110,7 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     !Array.isArray((json as Partial<BackupFile>).materialItems) ||
     !Array.isArray((json as Partial<BackupFile>).photos)
   ) {
-    throw new Error('Das ist keine gültige E-Servicebericht-Sicherungsdatei.');
+    throw new Error('Das ist keine gültige Rivo-Sicherungsdatei.');
   }
 
   const backup = json as BackupFile;
@@ -139,9 +145,9 @@ export async function restoreBackup(data: AllData): Promise<void> {
   await restoreAllData(data);
 }
 
-/** Dateiname-Vorschlag für den Download, z.B. "E-Servicebericht-Backup-2026-08-11.json". */
+/** Dateiname-Vorschlag für den Download, z.B. "Rivo-Backup-2026-08-11.json". */
 export function suggestedBackupFileName(): string {
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  return `E-Servicebericht-Backup-${date}.json`;
+  return `Rivo-Backup-${date}.json`;
 }

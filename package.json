@@ -1,8 +1,8 @@
 {
-  "name": "e-servicebericht",
+  "name": "rivo",
   "private": true,
   "version": "0.1.0",
-  "description": "Mobile-first PWA zur Erfassung von Serviceberichten (Elektrohandwerk)",
+  "description": "Rivo – mobile-first PWA zur Erfassung von Serviceberichten (Elektrohandwerk)",
   "type": "module",
   "scripts": {
     "dev": "vite",

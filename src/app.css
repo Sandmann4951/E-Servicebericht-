@@ -49,6 +49,10 @@
      nur eine Erinnerung. */
   --color-unexported: var(--color-text-muted);
   --color-unexported-bg: var(--color-surface-muted);
+  /* Rivo-Markenakzent (aus dem Logo: Lime-Grün #a3e635 auf dunklem Badge) -
+     für Fließtext auf hellem Grund abgedunkelt (Lesbarkeit), z.B. der
+     "R" in "Rivo" im Header. Das Logo selbst bleibt unverändert #a3e635. */
+  --color-brand-accent: #65a30d;
 
   --radius-sm: 8px;
   --radius-md: 14px;

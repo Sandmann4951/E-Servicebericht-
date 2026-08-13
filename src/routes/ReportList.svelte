@@ -5,6 +5,7 @@
   import ReportCard from '../lib/components/ReportCard.svelte';
   import Icon from '../lib/components/Icon.svelte';
   import { navigate } from '../lib/router.svelte';
+  import logoUrl from '../assets/logo.svg';
 
   let reports = $state<ServiceReport[]>([]);
   let filter = $state<ReportFilter>('all');
@@ -160,7 +161,10 @@
 
 <div class="screen">
   <header class="header">
-    <h1>Serviceberichte</h1>
+    <div class="brand">
+      <img src={logoUrl} alt="" class="brand-icon" width="34" height="34" />
+      <h1 class="brand-name"><span class="brand-accent">R</span>ivo</h1>
+    </div>
     <div class="menu-wrapper">
       <button
         type="button"
@@ -267,9 +271,25 @@
     padding: calc(var(--space-4) + var(--safe-top)) var(--space-4) var(--space-2);
   }
 
-  .header h1 {
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  .brand-icon {
+    border-radius: 22%;
+    flex-shrink: 0;
+  }
+
+  .brand-name {
     margin: 0;
     font-size: 1.4rem;
+  }
+
+  .brand-accent {
+    color: var(--color-brand-accent);
   }
 
   .menu-wrapper {

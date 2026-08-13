@@ -139,6 +139,6 @@ describe('buildBackupFile / parseBackupFile', () => {
 describe('suggestedBackupFileName', () => {
   it('liefert einen Dateinamen mit heutigem Datum', () => {
     const name = suggestedBackupFileName();
-    expect(name).toMatch(/^E-Servicebericht-Backup-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(name).toMatch(/^Rivo-Backup-\d{4}-\d{2}-\d{2}\.json$/);
   });
 });

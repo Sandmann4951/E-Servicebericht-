@@ -1,6 +1,8 @@
-# E-Servicebericht
+# Rivo
 
 Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberichten für Serviceeinsätze im Elektrohandwerk. Läuft im Browser (iPhone Safari, Android Chrome, Desktop) und lässt sich wie eine native App auf dem Homescreen installieren – ganz ohne App Store.
+
+> Hinweis: Die App heißt "Rivo" (Name + Logo, siehe Abschnitt "Design"). Repository-Name und die daraus abgeleitete GitHub-Pages-URL bleiben technisch bei `E-Servicebericht-`, um bestehende Links/Deploy-Konfiguration nicht zu brechen.
 
 ## Funktionen (MVP)
 
@@ -42,6 +44,11 @@ Die App wird schrittweise nach einem Moodboard überarbeitet. **Runde 1 (umgeset
 **Runde 2 (umgesetzt):**
 - Durchgängiges Icon-Set (`src/lib/components/Icon.svelte`) anstelle der bisherigen Emoji-Icons: eine kleine, feste Auswahl selbst gehosteter SVG-Icons im Stil von [Feather Icons](https://feathericons.com/) (MIT-Lizenz), direkt als Konstante eingebettet – wie schon die Schriftart bewusst **ohne** npm-Icon-Paket und **ohne** Laufzeit-Abhängigkeit von einem CDN, damit die App zu 100 % offlinefähig bleibt
 - Feinschliff der Status-/Badge-Farbsemantik: "Unterschrieben" (vom Kunden signiert) und "Final abgeschlossen" (manuell ohne Unterschrift gesperrt) sehen jetzt farblich unterschiedlich aus (Blau vs. dunkles Anthrazit aus dem Moodboard-Ton `--color-ink`), obwohl beide den Bericht sperren – vorher teilten sie sich dieselbe Farbe. Abgeschlossene, aber noch nicht exportierte Berichte bekommen zusätzlich einen dezenten "Nicht exportiert"-Hinweis in der Übersicht als Erinnerung, den Bericht noch als Word-Dokument zu exportieren
+
+**Runde 3 (umgesetzt) – Rebrand zu "Rivo":**
+- Echtes Logo (`src/assets/logo.svg`, auch Quelle für `public/favicon.svg` sowie alle PWA-/Homescreen-Icons): stilisiertes "R"-Monogramm (weißer Stamm/Bogen, lime-grünes diagonales "Bein") auf dunklem, abgerundetem Badge – als flaches SVG nachgebaut nach der vom Kunden gelieferten Logo-Vorlage, nicht als eingebettetes Rasterbild, damit es in jeder Icon-Größe (Favicon bis 512px-Homescreen-Icon) scharf bleibt. Eigene maskable-Variante mit zusätzlichem Sicherheitsabstand für Android.
+- App-Name durchgängig auf **"Rivo"** umgestellt (Seitentitel, PWA-Manifest `name`/`short_name`, "Zum Home-Bildschirm"-Titel, Berichtsliste-Header mit Logo + Wordmark, Sicherungsdatei-Name/-Fehlertext). Bewusst **nicht** angefasst: das interne Sicherungsdatei-Format-Tag (`e-servicebericht-backup-v2`, siehe `backupFile.ts`) und der IndexedDB-Datenbankname – eine Umbenennung dieser rein internen Kennungen hätte bereits vorhandene Sicherungen/lokale Daten ungültig gemacht bzw. verwaist, ohne jeden sichtbaren Nutzen.
+- Die restliche Farbpalette (Primär-Blau aus Runde 1) und Typografie bleiben unverändert – nur Logo/Icon-Assets und der Marken-Akzent im Header (`--color-brand-accent`, ein abgedunkeltes Lime für Lesbarkeit auf hellem Grund) nutzen den neuen Rivo-Ton. Ein vollständiges Dunkel-/Lime-Theme für die ganze App war nicht Teil des Auftrags und ist als möglicher weiterer Schritt offen.
 
 ## Tech-Stack
 

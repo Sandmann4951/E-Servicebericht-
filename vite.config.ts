@@ -25,9 +25,9 @@ export default defineConfig(() => ({
       registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'E-Servicebericht',
-        short_name: 'Servicebericht',
-        description: 'Digitale Serviceberichte für Elektrohandwerk-Serviceeinsätze',
+        name: 'Rivo',
+        short_name: 'Rivo',
+        description: 'Rivo – digitale Serviceberichte für Elektrohandwerk-Serviceeinsätze',
         lang: 'de',
         start_url: basePath,
         scope: basePath,
