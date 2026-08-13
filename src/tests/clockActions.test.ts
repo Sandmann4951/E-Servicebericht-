@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from './testUtils';
-import { checkInDay, checkOutDay, reassignIdleEntry, switchToIdle, switchToProject } from '../lib/clockActions';
-import { createReport, finalizeReport, getReport } from '../lib/db/reports';
+import {
+  checkInDay,
+  checkOutDay,
+  reassignIdleEntry,
+  startProjectByNumber,
+  switchToIdle,
+  switchToProject
+} from '../lib/clockActions';
+import { createReport, finalizeReport, getReport, listReports } from '../lib/db/reports';
 import {
   addTimeEntry,
   getGloballyActiveTimeEntry,
@@ -202,5 +209,51 @@ describe('reassignIdleEntry', () => {
     expect(updated?.timeEntryCount).toBe(1);
     expect(updated?.totalDurationMinutes).toBe(60);
     expect(await listUnassignedIdleEntries()).toEqual([]);
+  });
+});
+
+describe('startProjectByNumber', () => {
+  it('legt einen neuen Bericht an, wenn es diese Projektnummer noch nicht gibt', async () => {
+    const result = await startProjectByNumber('555555');
+
+    expect(result.reused).toBe(false);
+    expect(result.visitNumber).toBe(1);
+    expect(result.visitTotal).toBe(1);
+    expect(result.report.projectNumber).toBe('555555');
+  });
+
+  it('verwendet einen bereits offenen Bericht mit derselben Projektnummer wieder, statt ein Duplikat anzulegen', async () => {
+    const open = await createReport({ projectNumber: '555555' });
+
+    const result = await startProjectByNumber('555555');
+
+    expect(result.reused).toBe(true);
+    expect(result.report.id).toBe(open.id);
+    const all = await listReports('all');
+    expect(all.filter((r) => r.projectNumber === '555555')).toHaveLength(1);
+  });
+
+  it('legt einen weiteren Bericht an (mit korrekter Besuchsnummer), wenn der bisherige Bericht zu dieser Projektnummer bereits gesperrt ist', async () => {
+    const first = await createReport({ projectNumber: '555555' });
+    await finalizeReport(first.id);
+
+    const result = await startProjectByNumber('555555');
+
+    expect(result.reused).toBe(false);
+    expect(result.report.id).not.toBe(first.id);
+    expect(result.visitNumber).toBe(2);
+    expect(result.visitTotal).toBe(2);
+  });
+
+  it('trimmt die eingegebene Projektnummer', async () => {
+    const result = await startProjectByNumber('  555555  ');
+
+    expect(result.report.projectNumber).toBe('555555');
+  });
+
+  it('übernimmt den Techniker-Namen beim Neuanlegen', async () => {
+    const result = await startProjectByNumber('555555', 'Daniel');
+
+    expect(result.report.technicianName).toBe('Daniel');
   });
 });

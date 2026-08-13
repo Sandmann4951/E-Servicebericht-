@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import {
   createReport,
@@ -6,6 +6,7 @@ import {
   finalizeReport,
   getReport,
   listReports,
+  listReportsByProjectNumber,
   markReportExported,
   setReportSignature,
   unlockReport,
@@ -206,5 +207,35 @@ describe('reports repository', () => {
     expect(await finalizeReport('does-not-exist')).toBeUndefined();
     expect(await unlockReport('does-not-exist')).toBeUndefined();
     expect(await markReportExported('does-not-exist')).toBeUndefined();
+  });
+});
+
+describe('listReportsByProjectNumber', () => {
+  it('liefert eine leere Liste, wenn es keinen Bericht mit dieser Projektnummer gibt', async () => {
+    expect(await listReportsByProjectNumber('999999')).toEqual([]);
+  });
+
+  it('liefert nur Berichte mit exakt dieser Projektnummer, älteste zuerst', async () => {
+    // `createdAt` wird intern per `new Date().toISOString()` gesetzt - die
+    // Systemzeit wird hier bewusst nur für `Date` gefaked (nicht Timer),
+    // damit die beiden Berichte garantiert unterschiedliche, kontrollierte
+    // Zeitstempel bekommen und die Sortierung deterministisch testbar ist -
+    // ohne fake-indexeddbs eigene Timer-basierte Event-Verarbeitung zu stören.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T08:00:00.000Z'));
+      const first = await createReport({ projectNumber: '555555' });
+      await finalizeReport(first.id);
+
+      vi.setSystemTime(new Date('2026-08-11T08:00:00.000Z'));
+      const second = await createReport({ projectNumber: '555555' });
+
+      await createReport({ projectNumber: 'ANDERE' });
+
+      const related = await listReportsByProjectNumber('555555');
+      expect(related.map((r) => r.id)).toEqual([first.id, second.id]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

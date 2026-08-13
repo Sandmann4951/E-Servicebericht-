@@ -4,6 +4,7 @@
     deleteReport,
     finalizeReport,
     getReport,
+    listReportsByProjectNumber,
     markReportExported,
     setReportSignature,
     unlockReport,
@@ -52,6 +53,16 @@
   let signedByName = $state<string | undefined>(undefined);
   let signedAt = $state<string | undefined>(undefined);
   let finalizedAt = $state<string | undefined>(undefined);
+
+  /**
+   * Gibt an, der wievielte Bericht dieser unter allen Berichten mit derselben
+   * Projektnummer ist (z.B. wiederkehrender Kunde/Standort) - `undefined`,
+   * wenn es der einzige ist. Wird einmalig beim Laden anhand der zu diesem
+   * Zeitpunkt gespeicherten Projektnummer ermittelt (siehe Lade-Effekt unten);
+   * ändert sich die Projektnummer danach, bleibt die Anzeige bis zum nächsten
+   * Neuladen auf dem alten Stand - für eine reine Info-Anzeige unkritisch.
+   */
+  let projectVisitInfo = $state<{ index: number; total: number } | undefined>(undefined);
 
   // Ein final abgeschlossener Bericht darf nicht mehr verändert werden - die
   // Sperre hängt an `finalizedAt`, das sowohl beim Unterschreiben als auch
@@ -191,6 +202,15 @@
       signedAt = report.signedAt;
       finalizedAt = report.finalizedAt;
       loading = false;
+
+      listReportsByProjectNumber(report.projectNumber).then((related) => {
+        if (cancelled) return;
+        if (related.length > 1) {
+          projectVisitInfo = { index: related.findIndex((r) => r.id === report.id) + 1, total: related.length };
+        } else {
+          projectVisitInfo = undefined;
+        }
+      });
     });
     return () => {
       cancelled = true;
@@ -429,6 +449,9 @@
           <span class="fields-toggle-text">
             <strong>{projectNumber || 'Ohne Projektnummer'}</strong>
             {#if customer}<span class="fields-toggle-customer"> · {customer}</span>{/if}
+            {#if projectVisitInfo}
+              <span class="visit-badge">{projectVisitInfo.index}. von {projectVisitInfo.total} Berichten</span>
+            {/if}
           </span>
           <span class="chevron" class:open={fieldsExpanded}>▾</span>
         </button>
@@ -726,6 +749,16 @@
   .fields-toggle-customer {
     color: var(--color-text-muted);
     font-weight: 400;
+  }
+
+  .visit-badge {
+    margin-left: var(--space-2);
+    padding: 2px var(--space-2);
+    border-radius: 999px;
+    background: var(--color-surface-muted);
+    color: var(--color-text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
   }
 
   .chevron {

@@ -58,6 +58,19 @@ export async function listReports(filter: ReportFilter = 'all'): Promise<Service
 }
 
 /**
+ * Alle Berichte mit exakt dieser Projektnummer (jeder Status), älteste
+ * zuerst - Grundlage für die "X. Bericht zu diesem Projekt"-Anzeige und die
+ * Duplikat-Prüfung beim Direkt-Einstempeln (siehe startProjectByNumber() in
+ * clockActions.ts). Nutzt den bereits vorhandenen `projectNumber`-Index,
+ * kein Schema-Änderung nötig.
+ */
+export async function listReportsByProjectNumber(projectNumber: string): Promise<ServiceReport[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('reports', 'projectNumber', projectNumber.trim());
+  return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
  * Liest einen Bericht, lässt ihn per `mutate` verändern und schreibt ihn
  * zurück - alles in EINER Transaktion statt über die db.get()/db.put()-
  * Shorthands (die jeweils eine eigene, sofort abgeschlossene Transaktion

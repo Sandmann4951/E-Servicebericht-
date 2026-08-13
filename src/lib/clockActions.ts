@@ -1,7 +1,7 @@
-import { getReport } from './db/reports';
+import { createReport, getReport, listReportsByProjectNumber } from './db/reports';
 import { addTimeEntry, getGloballyActiveTimeEntry, listTimeEntriesForWorkDay, updateTimeEntry } from './db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
-import type { ID, WorkDay } from './db/types';
+import type { ID, ServiceReport, WorkDay } from './db/types';
 import { nowHHmm, todayISODate } from './utils/date';
 
 export interface DaySummary {
@@ -107,4 +107,55 @@ export async function switchToIdle(): Promise<void> {
 /** Ordnet einen bestehenden Leerlaufzeit-Eintrag nachträglich einem Bericht zu. */
 export async function reassignIdleEntry(entryId: ID, reportId: ID): Promise<void> {
   await updateTimeEntry(entryId, { reportId });
+}
+
+export interface StartProjectResult {
+  report: ServiceReport;
+  /** true, wenn ein bereits offener Bericht mit dieser Projektnummer wiederverwendet wurde, statt einen neuen anzulegen. */
+  reused: boolean;
+  /** Position dieses Berichts unter allen Berichten mit dieser Projektnummer, chronologisch (1 = erster). */
+  visitNumber: number;
+  /** Gesamtzahl der Berichte mit dieser Projektnummer (inkl. diesem). */
+  visitTotal: number;
+}
+
+/**
+ * Löst eine per Hand eingegebene Projektnummer (Direkt-Einstempeln-
+ * Schnellzugriff) zu einem Bericht auf - für den Fall, dass es zu dieser
+ * Nummer bereits Berichte gibt (wiederkehrender Kunde/Standort):
+ *
+ * - Existiert bereits ein NICHT gesperrter Bericht mit exakt dieser
+ *   Projektnummer, wird DER wiederverwendet statt ein Duplikat anzulegen -
+ *   man kann ja nicht zwei offene Berichte parallel zum selben Projekt
+ *   führen wollen.
+ * - Sonst wird ein neuer Bericht angelegt (auch wenn es zu dieser
+ *   Projektnummer bereits abgeschlossene/gesperrte Berichte gibt - z.B. ein
+ *   erneuter Einsatz beim selben Kunden). `visitNumber`/`visitTotal` geben
+ *   an, der wievielte Bericht zu dieser Projektnummer das ist, damit die
+ *   UI das sichtbar machen kann.
+ *
+ * Prüft bewusst `finalizedAt` (die kanonische Sperre, siehe switchToProject())
+ * statt `status`, um das kurze Zeitfenster zwischen dem Setzen von
+ * `finalizedAt` beim Unterschreiben und dem etwas später greifenden
+ * Autosave-Update von `status` sicher abzudecken.
+ */
+export async function startProjectByNumber(
+  projectNumber: string,
+  technicianName?: string
+): Promise<StartProjectResult> {
+  const trimmed = projectNumber.trim();
+  const existing = await listReportsByProjectNumber(trimmed);
+  const openExisting = existing.find((report) => !report.finalizedAt);
+
+  if (openExisting) {
+    return {
+      report: openExisting,
+      reused: true,
+      visitNumber: existing.indexOf(openExisting) + 1,
+      visitTotal: existing.length
+    };
+  }
+
+  const report = await createReport({ projectNumber: trimmed, technicianName });
+  return { report, reused: false, visitNumber: existing.length + 1, visitTotal: existing.length + 1 };
 }
