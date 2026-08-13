@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getActiveWorkDay } from '../db/workDays';
-  import { getGloballyActiveTimeEntry } from '../db/timeEntries';
+  import { getGloballyActiveTimeEntry, listTimeEntriesForWorkDay } from '../db/timeEntries';
   import { getReport, listReports } from '../db/reports';
   import type { WorkDay, TimeEntry, ServiceReport } from '../db/types';
   import { checkInDay, checkOutDay, switchToProject, startProjectByNumber, type DaySummary } from '../clockActions';
@@ -18,6 +18,10 @@
   let busy = $state(false);
   let quickClockInBusy = $state(false);
   let daySummary = $state<DaySummary | undefined>(undefined);
+  /** Live-Zwischenstand des laufenden Tages (Gesamt/Projekt/Leerlaufzeit bis jetzt) - im Unterschied zu `daySummary` schon WÄHREND der Tag noch läuft, nicht erst nach dem Ausstempeln. */
+  let todaySummary = $state<{ totalMinutes: number; projectMinutes: number; idleMinutes: number } | undefined>(
+    undefined
+  );
   /** Nur zum periodischen Neuberechnen der Anzeige - kein eigener Nutzwert. */
   let tick = $state(0);
 
@@ -49,7 +53,38 @@
       activeEntry = undefined;
       activeReport = undefined;
     }
+    await loadTodaySummary();
     loading = false;
+  }
+
+  /**
+   * Summiert alle Zeitabschnitte des laufenden Tages zu Gesamt-/Projekt-/
+   * Leerlaufzeit - inklusive des gerade offenen Abschnitts (dessen Dauer erst
+   * beim Schließen als `durationMinutes` gespeichert wird, bis dahin wird sie
+   * hier live aus Start- bis Jetzt-Zeit nachgerechnet). Läuft leer, solange
+   * kein Tag aktiv ist.
+   */
+  async function loadTodaySummary(): Promise<void> {
+    if (!workDay) {
+      todaySummary = undefined;
+      return;
+    }
+    const entries = await listTimeEntriesForWorkDay(workDay.id);
+    let projectMinutes = 0;
+    let idleMinutes = 0;
+    for (const entry of entries) {
+      let minutes = entry.durationMinutes;
+      if (minutes === undefined && entry.startTime && !entry.endTime) {
+        minutes = computeDurationMinutes(entry.startTime, nowHHmm());
+      }
+      minutes ??= 0;
+      if (entry.reportId) {
+        projectMinutes += minutes;
+      } else {
+        idleMinutes += minutes;
+      }
+    }
+    todaySummary = { totalMinutes: projectMinutes + idleMinutes, projectMinutes, idleMinutes };
   }
 
   // Läuft einmal beim Mount - reicht aus, da diese Komponente bei jedem
@@ -60,7 +95,10 @@
 
   $effect(() => {
     if (!activeEntry) return;
-    const interval = setInterval(() => (tick += 1), 30_000);
+    const interval = setInterval(() => {
+      tick += 1;
+      loadTodaySummary();
+    }, 30_000);
     return () => clearInterval(interval);
   });
 
@@ -173,10 +211,27 @@
         <p class="day-summary-title">✅ Tag ausgestempelt</p>
         <div class="stats">
           <div class="stat"><strong>{formatDurationMinutes(daySummary.totalMinutes)}</strong><span>Gesamt</span></div>
-          <div class="stat"><strong>{formatDurationMinutes(daySummary.projectMinutes)}</strong><span>Projekt</span></div>
-          <div class="stat"><strong>{formatDurationMinutes(daySummary.idleMinutes)}</strong><span>Leerlaufzeit</span></div>
+          <div class="stat project-stat">
+            <strong>{formatDurationMinutes(daySummary.projectMinutes)}</strong><span>Projekt</span>
+          </div>
+          <div class="stat idle-stat">
+            <strong>{formatDurationMinutes(daySummary.idleMinutes)}</strong><span>Leerlaufzeit</span>
+          </div>
         </div>
         <button type="button" class="dismiss" onclick={dismissSummary}>Schließen</button>
+      </div>
+    {:else if workDay && todaySummary}
+      <div class="today-summary">
+        <p class="today-summary-title">Heute bisher</p>
+        <div class="stats">
+          <div class="stat"><strong>{formatDurationMinutes(todaySummary.totalMinutes)}</strong><span>Gesamt</span></div>
+          <div class="stat project-stat">
+            <strong>{formatDurationMinutes(todaySummary.projectMinutes)}</strong><span>Projekt</span>
+          </div>
+          <div class="stat idle-stat">
+            <strong>{formatDurationMinutes(todaySummary.idleMinutes)}</strong><span>Leerlaufzeit</span>
+          </div>
+        </div>
       </div>
     {/if}
 
@@ -272,6 +327,23 @@
     color: var(--color-completed);
   }
 
+  .today-summary {
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .today-summary-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+
   .stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -295,6 +367,14 @@
   .stat span {
     font-size: 0.7rem;
     color: var(--color-text-muted);
+  }
+
+  .project-stat strong {
+    color: var(--color-completed);
+  }
+
+  .idle-stat strong {
+    color: var(--color-open);
   }
 
   .dismiss {
