@@ -8,6 +8,9 @@
   import { navigate } from '../router.svelte';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
 
+  /** Optional: informiert die Elternkomponente (ReportList), wenn sich der Eingecheckt-Status geändert haben könnte - z.B. für die Anpinnen/Hervorheben-Anzeige in der Berichtsliste. */
+  let { onChanged = () => {} }: { onChanged?: () => void } = $props();
+
   let workDay = $state<WorkDay | undefined>(undefined);
   let activeEntry = $state<TimeEntry | undefined>(undefined);
   let activeReport = $state<ServiceReport | undefined>(undefined);
@@ -74,6 +77,7 @@
       await checkInDay();
       daySummary = undefined;
       await load();
+      onChanged();
     } finally {
       busy = false;
     }
@@ -85,6 +89,7 @@
     try {
       daySummary = await checkOutDay();
       await load();
+      onChanged();
     } finally {
       busy = false;
     }

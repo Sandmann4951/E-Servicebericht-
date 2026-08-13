@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
@@ -13,16 +13,28 @@
   let backupError = $state('');
   let fileInput: HTMLInputElement | undefined;
   let menuOpen = $state(false);
+  /** Der Bericht, in den aktuell eingecheckt ist (falls einer) - wird oben angepinnt und farblich hervorgehoben. */
+  let activeReportId = $state<string | undefined>(undefined);
 
   // Reine Client-seitige Textsuche über die bereits geladene (nach Status
   // gefilterte) Liste - kein neuer DB-Index nötig, bei der zu erwartenden
   // Berichtsanzahl eines Solo-Handwerkers völlig ausreichend performant.
+  // Der eingecheckte Bericht wird danach zusätzlich an die erste Stelle
+  // gezogen (falls durch Filter/Suche überhaupt noch enthalten) - unabhängig
+  // von der sonst nach `updatedAt` sortierten Reihenfolge soll er immer sofort
+  // sichtbar sein.
   const filteredReports = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return reports;
-    return reports.filter(
-      (report) => report.projectNumber.toLowerCase().includes(query) || (report.customer ?? '').toLowerCase().includes(query)
-    );
+    const base = !query
+      ? reports
+      : reports.filter(
+          (report) =>
+            report.projectNumber.toLowerCase().includes(query) || (report.customer ?? '').toLowerCase().includes(query)
+        );
+    if (!activeReportId) return base;
+    const activeIndex = base.findIndex((report) => report.id === activeReportId);
+    if (activeIndex <= 0) return base;
+    return [base[activeIndex], ...base.slice(0, activeIndex), ...base.slice(activeIndex + 1)];
   });
 
   async function loadReports(): Promise<void> {
@@ -31,9 +43,22 @@
     loading = false;
   }
 
+  async function loadActiveReportId(): Promise<void> {
+    const entry = await getGloballyActiveTimeEntry();
+    activeReportId = entry?.reportId;
+  }
+
   $effect(() => {
     filter;
     loadReports();
+  });
+
+  // Läuft einmal beim Mount - reicht für den Normalfall (Navigation in einen
+  // Bericht und zurück mountet diesen Screen ohnehin frisch neu). DayClocks
+  // onChanged deckt den Sonderfall ab, dass sich der Eingecheckt-Status
+  // ändert, OHNE dass man diesen Screen verlässt (z.B. "Tag ausstempeln").
+  $effect(() => {
+    loadActiveReportId();
   });
 
   function newReport(): void {
@@ -176,7 +201,7 @@
     <p class="backup-error">{backupError}</p>
   {/if}
 
-  <DayClock />
+  <DayClock onChanged={loadActiveReportId} />
 
   <input
     type="search"
@@ -215,7 +240,7 @@
     {:else}
       <ul class="list">
         {#each filteredReports as report (report.id)}
-          <li><ReportCard {report} /></li>
+          <li><ReportCard {report} checkedIn={report.id === activeReportId} /></li>
         {/each}
       </ul>
     {/if}
