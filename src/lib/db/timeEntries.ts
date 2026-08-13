@@ -136,6 +136,61 @@ export async function findOverlappingTimeEntries(
 }
 
 /**
+ * Kürzt oder splittet Zeiteinträge, die sich mit [cutStartTime, cutEndTime)
+ * überschneiden - Gegenstück zu findOverlappingTimeEntries(). Wird beim
+ * manuellen Erfassen einer neuen Zeit aufgerufen, wenn der Nutzer bestätigt,
+ * die Überschneidung "wegzuschneiden": statt die alten Einträge komplett zu
+ * löschen, wird nur das überschneidende Zeitfenster entfernt, der Rest des
+ * jeweiligen Eintrags bleibt erhalten. Für jeden übergebenen Eintrag:
+ * - liegt er komplett innerhalb des Ausschnitts -> wird er ganz gelöscht
+ * - überschneidet sich nur sein Anfang oder sein Ende -> wird er entsprechend
+ *   gekürzt (Start bzw. Ende verschoben)
+ * - liegt der Ausschnitt komplett INNERHALB des Eintrags -> wird der Eintrag
+ *   gesplittet: der bestehende Datensatz behält den Teil vor dem Ausschnitt,
+ *   ein neuer Datensatz (gleiche reportId/workDayId/Notiz) entsteht für den
+ *   Teil danach.
+ * Nutzt bewusst dieselbe (nicht mitternachts-bewusste) Minuten-Umrechnung wie
+ * findOverlappingTimeEntries(), damit die hier bearbeiteten Einträge exakt zu
+ * den dort gefundenen Überschneidungen passen.
+ */
+export async function trimOverlappingTimeEntries(
+  overlaps: TimeEntry[],
+  cutStartTime: string,
+  cutEndTime: string
+): Promise<void> {
+  const cutStart = parseTimeToMinutes(cutStartTime);
+  const cutEnd = parseTimeToMinutes(cutEndTime);
+  if (cutStart === undefined || cutEnd === undefined) return;
+
+  for (const entry of overlaps) {
+    if (!entry.startTime || !entry.endTime) continue;
+    const entryStart = parseTimeToMinutes(entry.startTime);
+    const entryEnd = parseTimeToMinutes(entry.endTime);
+    if (entryStart === undefined || entryEnd === undefined) continue;
+
+    const remainderBefore = entryStart < cutStart;
+    const remainderAfter = entryEnd > cutEnd;
+
+    if (remainderBefore && remainderAfter) {
+      await updateTimeEntry(entry.id, { endTime: cutStartTime });
+      await addTimeEntry(entry.reportId, {
+        date: entry.date,
+        startTime: cutEndTime,
+        endTime: entry.endTime,
+        note: entry.note,
+        workDayId: entry.workDayId
+      });
+    } else if (remainderBefore) {
+      await updateTimeEntry(entry.id, { endTime: cutStartTime });
+    } else if (remainderAfter) {
+      await updateTimeEntry(entry.id, { startTime: cutEndTime });
+    } else {
+      await deleteTimeEntry(entry.id);
+    }
+  }
+}
+
+/**
  * `reportId` ist optional: `undefined` legt einen Leerlaufzeit-Eintrag an
  * (eingestempelt, aber keinem Projekt zugeordnet) - dann wird auch keine
  * Report-Summary neu berechnet, da der Eintrag zu keinem Bericht gehört.

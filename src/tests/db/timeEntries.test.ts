@@ -9,6 +9,7 @@ import {
   getGloballyActiveTimeEntry,
   listTimeEntries,
   listTimeEntriesForDate,
+  trimOverlappingTimeEntries,
   updateTimeEntry
 } from '../../lib/db/timeEntries';
 
@@ -233,6 +234,99 @@ describe('findOverlappingTimeEntries (Plausibilitätsprüfung)', () => {
 
     const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '10:00', entry.id);
     expect(overlaps).toEqual([]);
+  });
+});
+
+describe('trimOverlappingTimeEntries (Zeitfenster wegschneiden statt ganzen Eintrag löschen)', () => {
+  it('kürzt einen Eintrag, dessen ENDE sich mit dem Ausschnitt überschneidet, statt ihn zu löschen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const existing = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '12:00' });
+
+    await trimOverlappingTimeEntries([existing], '10:00', '14:00');
+
+    const remaining = await listTimeEntries(report.id);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].startTime).toBe('08:00');
+    expect(remaining[0].endTime).toBe('10:00');
+    expect(remaining[0].durationMinutes).toBe(120);
+  });
+
+  it('kürzt einen Eintrag, dessen ANFANG sich mit dem Ausschnitt überschneidet, statt ihn zu löschen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const existing = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '09:00', endTime: '11:00' });
+
+    await trimOverlappingTimeEntries([existing], '08:00', '10:00');
+
+    const remaining = await listTimeEntries(report.id);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].startTime).toBe('10:00');
+    expect(remaining[0].endTime).toBe('11:00');
+    expect(remaining[0].durationMinutes).toBe(60);
+  });
+
+  it('splittet einen Eintrag in zwei Teile, wenn der Ausschnitt komplett innerhalb liegt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const existing = await addTimeEntry(report.id, {
+      date: '2026-08-11',
+      startTime: '08:00',
+      endTime: '16:00',
+      note: 'Ganztags'
+    });
+
+    await trimOverlappingTimeEntries([existing], '11:00', '12:00');
+
+    const remaining = await listTimeEntries(report.id);
+    expect(remaining).toHaveLength(2);
+    expect(remaining.map((e) => [e.startTime, e.endTime])).toEqual([
+      ['08:00', '11:00'],
+      ['12:00', '16:00']
+    ]);
+    expect(remaining.every((e) => e.note === 'Ganztags')).toBe(true);
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.totalDurationMinutes).toBe(180 + 240);
+  });
+
+  it('löscht einen Eintrag vollständig, wenn er komplett innerhalb des Ausschnitts liegt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const existing = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '10:00', endTime: '11:00' });
+
+    await trimOverlappingTimeEntries([existing], '09:00', '12:00');
+
+    expect(await listTimeEntries(report.id)).toEqual([]);
+  });
+
+  it('behält workDayId und reportId=undefined (Leerlaufzeit) beim Splitten bei', async () => {
+    const idle = await addTimeEntry(undefined, {
+      date: '2026-08-11',
+      startTime: '08:00',
+      endTime: '10:00',
+      workDayId: 'workday-1'
+    });
+
+    await trimOverlappingTimeEntries([idle], '08:30', '09:00');
+
+    const entries = await listTimeEntriesForDate('2026-08-11');
+    expect(entries).toHaveLength(2);
+    expect(entries.every((e) => e.reportId === undefined)).toBe(true);
+    expect(entries.every((e) => e.workDayId === 'workday-1')).toBe(true);
+    expect(entries.map((e) => [e.startTime, e.endTime])).toEqual([
+      ['08:00', '08:30'],
+      ['09:00', '10:00']
+    ]);
+  });
+
+  it('verarbeitet mehrere überschneidende Einträge unabhängig voneinander', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    const entryA = await addTimeEntry(reportA.id, { date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
+    const entryB = await addTimeEntry(reportB.id, { date: '2026-08-11', startTime: '09:30', endTime: '13:00' });
+
+    await trimOverlappingTimeEntries([entryA, entryB], '09:00', '10:30');
+
+    const remainingA = await listTimeEntries(reportA.id);
+    const remainingB = await listTimeEntries(reportB.id);
+    expect(remainingA.map((e) => [e.startTime, e.endTime])).toEqual([['08:00', '09:00']]);
+    expect(remainingB.map((e) => [e.startTime, e.endTime])).toEqual([['10:30', '13:00']]);
   });
 });
 

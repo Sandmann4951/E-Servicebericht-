@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { addTimeEntry, deleteTimeEntry, findOverlappingTimeEntries, listTimeEntries, updateTimeEntry } from '../db/timeEntries';
+  import {
+    addTimeEntry,
+    deleteTimeEntry,
+    findOverlappingTimeEntries,
+    listTimeEntries,
+    trimOverlappingTimeEntries,
+    updateTimeEntry
+  } from '../db/timeEntries';
   import { getReport } from '../db/reports';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
@@ -95,10 +102,12 @@
 
         await persistEntry(payload);
 
-        if (confirm(`Sollen die sich überschneidenden Einträge jetzt entfernt werden?\n${list}`)) {
-          for (const entry of overlaps) {
-            await deleteTimeEntry(entry.id);
-          }
+        // Bewusst NICHT die ganzen überschneidenden Einträge löschen, sondern
+        // nur das überschneidende Zeitfenster herausschneiden - der Rest
+        // dieser Einträge (z.B. die Zeit vor oder nach der neuen Buchung)
+        // bleibt erhalten, ggf. gesplittet in zwei Teile.
+        if (confirm(`Soll die überschneidende Zeit bei diesen Einträgen automatisch entfernt werden (der übrige Zeitraum bleibt erhalten)?\n${list}`)) {
+          await trimOverlappingTimeEntries(overlaps, startTime, endTime);
         }
         resetForm();
         await load();
