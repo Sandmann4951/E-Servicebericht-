@@ -12,6 +12,7 @@
   let backupBusy = $state(false);
   let backupError = $state('');
   let fileInput: HTMLInputElement | undefined;
+  let menuOpen = $state(false);
 
   // Reine Client-seitige Textsuche über die bereits geladene (nach Status
   // gefilterte) Liste - kein neuer DB-Index nötig, bei der zu erwartenden
@@ -38,6 +39,36 @@
   function newReport(): void {
     navigate('/reports/new');
   }
+
+  function closeMenu(): void {
+    menuOpen = false;
+  }
+
+  function menuNavigate(path: string): void {
+    closeMenu();
+    navigate(path);
+  }
+
+  function menuExportBackup(): void {
+    closeMenu();
+    void exportBackup();
+  }
+
+  function menuTriggerImport(): void {
+    closeMenu();
+    triggerImport();
+  }
+
+  // Schließt das Menü bei Escape - Maus-/Tastatur-Bedienung (z.B. iPad mit
+  // externer Tastatur), auf dem Handy per Backdrop-Tap ohnehin abgedeckt.
+  $effect(() => {
+    if (!menuOpen) return;
+    function handleKeydown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') closeMenu();
+    }
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  });
 
   async function exportBackup(): Promise<void> {
     if (backupBusy) return;
@@ -104,13 +135,34 @@
 <div class="screen">
   <header class="header">
     <h1>Serviceberichte</h1>
-    <div class="backup-actions">
-      <button type="button" onclick={() => navigate('/statistik')} aria-label="Statistik anzeigen">📊</button>
-      <button type="button" onclick={() => navigate('/leerlaufzeiten')} aria-label="Leerlaufzeiten zuordnen">⏱️</button>
-      <button type="button" onclick={exportBackup} disabled={backupBusy} aria-label="Sicherung exportieren">💾</button>
-      <button type="button" onclick={triggerImport} disabled={backupBusy} aria-label="Sicherung wiederherstellen">
-        📥
+    <div class="menu-wrapper">
+      <button
+        type="button"
+        class="menu-toggle"
+        onclick={() => (menuOpen = !menuOpen)}
+        aria-label="Menü öffnen"
+        aria-haspopup="true"
+        aria-expanded={menuOpen}
+      >
+        ☰
       </button>
+      {#if menuOpen}
+        <button type="button" class="menu-backdrop" onclick={closeMenu} aria-label="Menü schließen"></button>
+        <div class="menu-popup" role="menu">
+          <button type="button" role="menuitem" onclick={() => menuNavigate('/statistik')}>
+            <span class="menu-icon">📊</span><span>Statistik</span>
+          </button>
+          <button type="button" role="menuitem" onclick={() => menuNavigate('/leerlaufzeiten')}>
+            <span class="menu-icon">⏱️</span><span>Leerlaufzeiten zuordnen</span>
+          </button>
+          <button type="button" role="menuitem" onclick={menuExportBackup} disabled={backupBusy}>
+            <span class="menu-icon">💾</span><span>Sicherung exportieren</span>
+          </button>
+          <button type="button" role="menuitem" onclick={menuTriggerImport} disabled={backupBusy}>
+            <span class="menu-icon">📥</span><span>Sicherung wiederherstellen</span>
+          </button>
+        </div>
+      {/if}
       <input
         bind:this={fileInput}
         type="file"
@@ -194,21 +246,71 @@
     font-size: 1.4rem;
   }
 
-  .backup-actions {
-    display: flex;
-    gap: var(--space-1);
+  .menu-wrapper {
+    position: relative;
   }
 
-  .backup-actions button {
+  .menu-toggle {
     background: transparent;
     border: none;
-    font-size: 1.3rem;
+    font-size: 1.4rem;
     padding: var(--space-2);
     min-height: auto;
+    color: var(--color-text);
   }
 
-  .backup-actions button:disabled {
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: auto;
+    z-index: 20;
+  }
+
+  .menu-popup {
+    position: absolute;
+    top: calc(100% + var(--space-1));
+    right: 0;
+    z-index: 21;
+    display: flex;
+    flex-direction: column;
+    min-width: 240px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 28px rgba(20, 25, 40, 0.18);
+    overflow: hidden;
+  }
+
+  .menu-popup button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: var(--space-3) var(--space-4);
+    min-height: 52px;
+    text-align: left;
+    font-size: 0.95rem;
+    color: var(--color-text);
+  }
+
+  .menu-popup button:not(:last-child) {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .menu-popup button:disabled {
     opacity: 0.5;
+  }
+
+  .menu-icon {
+    font-size: 1.2rem;
+    width: 1.4em;
+    text-align: center;
+    flex-shrink: 0;
   }
 
   .backup-error {

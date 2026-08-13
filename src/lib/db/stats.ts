@@ -1,5 +1,5 @@
 import { getDB } from './client';
-import type { ISODate } from './types';
+import type { ID, ISODate } from './types';
 
 export interface DayStats {
   date: ISODate;
@@ -41,4 +41,42 @@ export async function getDayStats(): Promise<DayStats[]> {
   }
 
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface DayProjectBreakdown {
+  reportId: ID;
+  projectNumber: string;
+  customer?: string;
+  minutes: number;
+}
+
+/**
+ * Liefert für einen einzelnen Tag, an welchen Berichten wie lange gearbeitet
+ * wurde (nur produktive, einem Bericht zugeordnete Zeit - Leerlaufzeit hat
+ * keinen Bericht) - Grundlage für die Projekt-Aufschlüsselung in der
+ * Statistik-Tagesansicht. Absteigend nach investierter Zeit sortiert.
+ */
+export async function getDayProjectBreakdown(date: ISODate): Promise<DayProjectBreakdown[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'date', date);
+
+  const minutesByReport = new Map<ID, number>();
+  for (const entry of entries) {
+    if (!entry.reportId || !entry.durationMinutes) continue;
+    minutesByReport.set(entry.reportId, (minutesByReport.get(entry.reportId) ?? 0) + entry.durationMinutes);
+  }
+
+  const breakdown = await Promise.all(
+    Array.from(minutesByReport.entries()).map(async ([reportId, minutes]) => {
+      const report = await db.get('reports', reportId);
+      return {
+        reportId,
+        projectNumber: report?.projectNumber ?? 'Unbekannter Bericht',
+        customer: report?.customer,
+        minutes
+      };
+    })
+  );
+
+  return breakdown.sort((a, b) => b.minutes - a.minutes);
 }

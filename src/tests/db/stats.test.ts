@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
-import { getDayStats } from '../../lib/db/stats';
+import { getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -71,5 +71,47 @@ describe('getDayStats', () => {
     const stats = await getDayStats();
 
     expect(stats).toEqual([{ date: '2026-08-13', productiveMinutes: 0, idleMinutes: 45, totalMinutes: 45 }]);
+  });
+});
+
+describe('getDayProjectBreakdown', () => {
+  it('liefert eine leere Liste ohne Zeiteinträge an dem Tag', async () => {
+    expect(await getDayProjectBreakdown('2026-08-10')).toEqual([]);
+  });
+
+  it('summiert mehrere Abschnitte im selben Bericht am selben Tag', async () => {
+    const report = await createReport({ projectNumber: 'A', customer: 'Müller GmbH' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' }); // 120
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '13:00', endTime: '14:30' }); // 90
+
+    const breakdown = await getDayProjectBreakdown('2026-08-10');
+
+    expect(breakdown).toEqual([{ reportId: report.id, projectNumber: 'A', customer: 'Müller GmbH', minutes: 210 }]);
+  });
+
+  it('listet mehrere Berichte am selben Tag, absteigend nach Zeit sortiert', async () => {
+    const reportA = await createReport({ projectNumber: 'A' });
+    const reportB = await createReport({ projectNumber: 'B' });
+    await addTimeEntry(reportA.id, { date: '2026-08-11', startTime: '08:00', endTime: '08:30' }); // 30
+    await addTimeEntry(reportB.id, { date: '2026-08-11', startTime: '09:00', endTime: '11:00' }); // 120
+
+    const breakdown = await getDayProjectBreakdown('2026-08-11');
+
+    expect(breakdown.map((b) => b.reportId)).toEqual([reportB.id, reportA.id]);
+    expect(breakdown.map((b) => b.minutes)).toEqual([120, 30]);
+  });
+
+  it('ignoriert Leerlaufzeit-Einträge (kein Bericht zugeordnet)', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-12', startTime: '08:00', endTime: '08:45' });
+
+    expect(await getDayProjectBreakdown('2026-08-12')).toEqual([]);
+  });
+
+  it('ignoriert Einträge ohne Dauer und an anderen Tagen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-13', startTime: '08:00' }); // noch offen
+    await addTimeEntry(report.id, { date: '2026-08-14', startTime: '08:00', endTime: '09:00' }); // anderer Tag
+
+    expect(await getDayProjectBreakdown('2026-08-13')).toEqual([]);
   });
 });

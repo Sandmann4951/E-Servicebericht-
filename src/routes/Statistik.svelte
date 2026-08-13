@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getDayStats, type DayStats } from '../lib/db/stats';
+  import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, todayISODate } from '../lib/utils/date';
 
@@ -8,6 +8,7 @@
   let dayStats = $state<DayStats[]>([]);
   let loading = $state(true);
   let view = $state<View>('monat');
+  let projectBreakdown = $state<DayProjectBreakdown[]>([]);
 
   const today = todayISODate();
   let selectedDate = $state(today);
@@ -22,6 +23,17 @@
 
   $effect(() => {
     load();
+  });
+
+  // Lädt die Projekt-Aufschlüsselung neu, sobald die Tag-Ansicht aktiv ist
+  // oder sich das gewählte Datum ändert - unabhängig davon, ob man über den
+  // "Tag"-Reiter direkt oder per Antippen einer Tages-Zeile aus der
+  // Monatsansicht (openDay) dorthin gelangt ist.
+  $effect(() => {
+    if (view !== 'tag') return;
+    getDayProjectBreakdown(selectedDate).then((result) => {
+      projectBreakdown = result;
+    });
   });
 
   function emptyStats(date: string): DayStats {
@@ -148,6 +160,28 @@
         <p class="empty">Keine Zeiten erfasst für diesen Tag.</p>
       {:else}
         {@render statsCardSnippet(dayStat)}
+
+        {#if projectBreakdown.length > 0}
+          <div class="projects">
+            <p class="section-title">Projekte an diesem Tag</p>
+            <ul class="breakdown">
+              {#each projectBreakdown as project (project.reportId)}
+                <li>
+                  <button type="button" class="breakdown-row" onclick={() => navigate(`/reports/${project.reportId}`)}>
+                    <span class="breakdown-label plain">
+                      {project.projectNumber}{#if project.customer} · {project.customer}{/if}
+                    </span>
+                    <span class="breakdown-values">
+                      <span class="productive">{formatDurationMinutes(project.minutes)}</span>
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {:else if dayStat.productiveMinutes === 0}
+          <p class="hint">Nur Leerlaufzeit an diesem Tag, keine Projektzeiten.</p>
+        {/if}
       {/if}
     {:else if view === 'monat'}
       <div class="nav">
@@ -394,6 +428,19 @@
     color: var(--color-text-muted);
   }
 
+  .projects {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .section-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+  }
+
   .breakdown {
     list-style: none;
     margin: 0;
@@ -420,6 +467,10 @@
   .breakdown-label {
     font-weight: 600;
     text-transform: capitalize;
+  }
+
+  .breakdown-label.plain {
+    text-transform: none;
   }
 
   .breakdown-values {
