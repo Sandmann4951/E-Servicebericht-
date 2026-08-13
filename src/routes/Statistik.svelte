@@ -2,6 +2,7 @@
   import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, todayISODate } from '../lib/utils/date';
+  import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
   import Icon from '../lib/components/Icon.svelte';
 
   type View = 'tag' | 'monat' | 'jahr';
@@ -10,6 +11,7 @@
   let loading = $state(true);
   let view = $state<View>('monat');
   let projectBreakdown = $state<DayProjectBreakdown[]>([]);
+  let monthTarget = $state<MonthTarget>({ targetMinutes: 0, workingDays: 0 });
 
   const today = todayISODate();
   let selectedDate = $state(today);
@@ -34,6 +36,15 @@
     if (view !== 'tag') return;
     getDayProjectBreakdown(selectedDate).then((result) => {
       projectBreakdown = result;
+    });
+  });
+
+  // Soll-Stunden nur nachladen, solange die Monatsansicht aktiv ist -
+  // dieselbe view-Gate-Logik wie bei der Projekt-Aufschlüsselung oben.
+  $effect(() => {
+    if (view !== 'monat') return;
+    getMonthTarget(selectedMonth).then((result) => {
+      monthTarget = result;
     });
   });
 
@@ -91,6 +102,12 @@
   function productivePercent(stats: DayStats): number {
     if (stats.totalMinutes <= 0) return 0;
     return Math.round((stats.productiveMinutes / stats.totalMinutes) * 100);
+  }
+
+  /** Formatiert eine Minuten-Differenz mit vorangestelltem Vorzeichen, z.B. "+3:15 Std." oder "-1:30 Std.". */
+  function formatDiffMinutes(diffMinutes: number): string {
+    const sign = diffMinutes < 0 ? '-' : '+';
+    return `${sign}${formatDurationMinutes(Math.abs(diffMinutes))}`;
   }
 
   const dayStat = $derived.by(() => dayStats.find((d) => d.date === selectedDate) ?? emptyStats(selectedDate));
@@ -201,6 +218,10 @@
         </button>
       </div>
 
+      {#if monthTarget.workingDays > 0}
+        {@render targetCardSnippet(monthTarget, monthTotal)}
+      {/if}
+
       {#if monthTotal.totalMinutes === 0}
         <p class="empty">Keine Zeiten erfasst für diesen Monat.</p>
       {:else}
@@ -249,6 +270,22 @@
     {/if}
   </div>
 </div>
+
+{#snippet targetCardSnippet(target: MonthTarget, actual: DayStats)}
+  <div class="stats-card">
+    <div class="stats">
+      <div class="stat"><strong>{formatDurationMinutes(target.targetMinutes)}</strong><span>Soll</span></div>
+      <div class="stat"><strong>{formatDurationMinutes(actual.totalMinutes)}</strong><span>Ist</span></div>
+      <div
+        class="stat"
+        class:diff-positive={actual.totalMinutes >= target.targetMinutes}
+        class:diff-negative={actual.totalMinutes < target.targetMinutes}
+      >
+        <strong>{formatDiffMinutes(actual.totalMinutes - target.targetMinutes)}</strong><span>Differenz</span>
+      </div>
+    </div>
+  </div>
+{/snippet}
 
 {#snippet statsCardSnippet(stats: DayStats)}
   <div class="stats-card">
@@ -407,6 +444,14 @@
 
   .idle-stat strong {
     color: var(--color-open);
+  }
+
+  .diff-positive strong {
+    color: var(--color-completed);
+  }
+
+  .diff-negative strong {
+    color: var(--color-danger);
   }
 
   .split-bar {

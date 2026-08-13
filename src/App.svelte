@@ -5,6 +5,8 @@
   import ReportDetail from './routes/ReportDetail.svelte';
   import Leerlaufzeiten from './routes/Leerlaufzeiten.svelte';
   import Statistik from './routes/Statistik.svelte';
+  import Abwesenheiten from './routes/Abwesenheiten.svelte';
+  import Einstellungen from './routes/Einstellungen.svelte';
   import InstallHintBanner from './lib/components/InstallHintBanner.svelte';
   import UpdateAvailableToast from './lib/components/UpdateAvailableToast.svelte';
 
@@ -26,6 +28,10 @@
     <Leerlaufzeiten />
   {:else if route.name === 'statistik'}
     <Statistik />
+  {:else if route.name === 'abwesenheiten'}
+    <Abwesenheiten />
+  {:else if route.name === 'einstellungen'}
+    <Einstellungen />
   {:else}
     <ReportList />
   {/if}

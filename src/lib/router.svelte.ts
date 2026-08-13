@@ -35,7 +35,9 @@ export type Route =
   | { name: 'list' }
   | { name: 'detail'; id: string }
   | { name: 'leerlaufzeiten' }
-  | { name: 'statistik' };
+  | { name: 'statistik' }
+  | { name: 'abwesenheiten' }
+  | { name: 'einstellungen' };
 
 export function parseRoute(path: string): Route {
   const detailMatch = /^\/reports\/([^/]+)\/?$/.exec(path);
@@ -47,6 +49,12 @@ export function parseRoute(path: string): Route {
   }
   if (/^\/statistik\/?$/.exec(path)) {
     return { name: 'statistik' };
+  }
+  if (/^\/abwesenheiten\/?$/.exec(path)) {
+    return { name: 'abwesenheiten' };
+  }
+  if (/^\/einstellungen\/?$/.exec(path)) {
+    return { name: 'einstellungen' };
   }
   return { name: 'list' };
 }

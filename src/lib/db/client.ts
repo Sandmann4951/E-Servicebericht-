@@ -76,6 +76,13 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
             await reportsStore.put(report);
           }
         }
+        if (oldVersion < 4) {
+          // Abwesenheiten (Urlaub/Krank/Zeitausgleich): eigener Store, dessen
+          // Primärschlüssel direkt das Datum ist (kein separater Index nötig -
+          // Bereichsabfragen für Monats-/Jahresansichten laufen einfach über
+          // den Primärschlüssel-Bereich).
+          db.createObjectStore('absences', { keyPath: 'date' });
+        }
       }
     });
   }

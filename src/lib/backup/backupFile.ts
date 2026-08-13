@@ -1,17 +1,19 @@
 import { getAllData, restoreAllData, type AllData } from '../db/backup';
 import type { Photo } from '../db/types';
 
-// v2 fügt den workDays-Store hinzu (Tagesstempeluhr). Neue Sicherungen werden
-// immer mit v2 geschrieben; v1-Dateien (ohne workDays) lassen sich weiterhin
-// lesen - workDays fällt dabei einfach leer aus, kein Fehler.
+// v2 fügt den workDays-Store hinzu (Tagesstempeluhr), v3 den absences-Store
+// (Urlaub/Krank/Zeitausgleich). Neue Sicherungen werden immer mit der
+// jeweils neuesten Version geschrieben; ältere Dateien lassen sich weiterhin
+// lesen - fehlende Felder fallen dabei einfach leer aus, kein Fehler.
 //
 // Bewusst NICHT ans Rebranding zu "Rivo" angepasst: diese Strings landen als
 // internes Format-Tag in jeder erzeugten Sicherungsdatei. Ändert man sie,
 // würden bereits vorhandene Sicherungen (mit dem alten Tag) plötzlich als
 // "ungültig" abgelehnt. Nur reine Anzeige-Texte (Fehlermeldung, Dateiname)
-// wurden unten umbenannt, das unsichtbare Format-Tag bleibt stabil.
+// wurden umbenannt, das unsichtbare Format-Tag bleibt stabil.
 const BACKUP_FORMAT_V1 = 'e-servicebericht-backup-v1';
 const BACKUP_FORMAT_V2 = 'e-servicebericht-backup-v2';
+const BACKUP_FORMAT_V3 = 'e-servicebericht-backup-v3';
 
 /** Foto-Datensatz mit den Blobs base64-kodiert statt als echte Blobs - JSON-tauglich. */
 type SerializedPhoto = Omit<Photo, 'blob' | 'thumbnailBlob'> & {
@@ -28,6 +30,8 @@ interface BackupFile {
   photos: SerializedPhoto[];
   /** Erst ab v2 vorhanden - bei v1-Dateien schlicht nicht vorhanden. */
   workDays?: AllData['workDays'];
+  /** Erst ab v3 vorhanden - bei v1/v2-Dateien schlicht nicht vorhanden. */
+  absences?: AllData['absences'];
 }
 
 /**
@@ -66,13 +70,14 @@ export async function buildBackupFile(): Promise<Blob> {
   );
 
   const backup: BackupFile = {
-    format: BACKUP_FORMAT_V2,
+    format: BACKUP_FORMAT_V3,
     exportedAt: new Date().toISOString(),
     reports: data.reports,
     timeEntries: data.timeEntries,
     materialItems: data.materialItems,
     photos,
-    workDays: data.workDays
+    workDays: data.workDays,
+    absences: data.absences
   };
   return new Blob([JSON.stringify(backup)], { type: 'application/json' });
 }
@@ -83,6 +88,7 @@ export interface BackupSummary {
   materialItemCount: number;
   photoCount: number;
   workDayCount: number;
+  absenceCount: number;
 }
 
 export interface ParsedBackup {
@@ -104,7 +110,7 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
   if (
     typeof json !== 'object' ||
     json === null ||
-    (format !== BACKUP_FORMAT_V1 && format !== BACKUP_FORMAT_V2) ||
+    (format !== BACKUP_FORMAT_V1 && format !== BACKUP_FORMAT_V2 && format !== BACKUP_FORMAT_V3) ||
     !Array.isArray((json as Partial<BackupFile>).reports) ||
     !Array.isArray((json as Partial<BackupFile>).timeEntries) ||
     !Array.isArray((json as Partial<BackupFile>).materialItems) ||
@@ -125,8 +131,10 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     timeEntries: backup.timeEntries,
     materialItems: backup.materialItems,
     photos,
-    // v1-Dateien haben keine workDays - dann bleibt es leer statt zu scheitern.
-    workDays: backup.workDays ?? []
+    // v1-Dateien haben keine workDays, v1/v2-Dateien keine absences - dann
+    // bleibt es jeweils leer statt zu scheitern.
+    workDays: backup.workDays ?? [],
+    absences: backup.absences ?? []
   };
 
   return {
@@ -136,7 +144,8 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
       timeEntryCount: data.timeEntries.length,
       materialItemCount: data.materialItems.length,
       photoCount: data.photos.length,
-      workDayCount: data.workDays.length
+      workDayCount: data.workDays.length,
+      absenceCount: data.absences.length
     }
   };
 }

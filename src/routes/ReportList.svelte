@@ -198,6 +198,12 @@
           <button type="button" role="menuitem" onclick={() => menuNavigate('/leerlaufzeiten')}>
             <span class="menu-icon"><Icon name="clock" /></span><span>Leerlaufzeiten zuordnen</span>
           </button>
+          <button type="button" role="menuitem" onclick={() => menuNavigate('/abwesenheiten')}>
+            <span class="menu-icon"><Icon name="calendar" /></span><span>Abwesenheiten</span>
+          </button>
+          <button type="button" role="menuitem" onclick={() => menuNavigate('/einstellungen')}>
+            <span class="menu-icon"><Icon name="settings" /></span><span>Einstellungen</span>
+          </button>
           <button type="button" role="menuitem" onclick={menuExportBackup} disabled={backupBusy}>
             <span class="menu-icon"><Icon name="download" /></span><span>Sicherung exportieren</span>
           </button>

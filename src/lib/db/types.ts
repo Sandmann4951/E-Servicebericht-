@@ -91,6 +91,24 @@ export interface WorkDay {
   updatedAt: ISODateTime;
 }
 
+export type AbsenceType = 'vacation' | 'sick' | 'timeoff';
+
+/**
+ * Eine Abwesenheit (Urlaub/Krank/Zeitausgleich) für einen ganzen Kalendertag
+ * - auch rückwirkend oder für die Zukunft eintragbar, unabhängig von der
+ * Tagesstempeluhr. Bewusst OHNE eigene uuid: das Datum selbst ist der
+ * Primärschlüssel (keyPath in der DB) - es kann nur eine Abwesenheit pro Tag
+ * geben, ein erneutes Speichern für denselben Tag überschreibt die
+ * vorherige Eintragung automatisch (Upsert statt Duplikat-Vermeidung).
+ */
+export interface Absence {
+  date: ISODate;
+  type: AbsenceType;
+  note?: string;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
 export interface MaterialItem {
   id: ID;
   reportId: ID;
@@ -140,7 +158,11 @@ export interface ServiceBerichtDB extends DBSchema {
     value: WorkDay;
     indexes: { date: string };
   };
+  absences: {
+    key: ISODate;
+    value: Absence;
+  };
 }
 
 export const DB_NAME = 'e-servicebericht-db';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;

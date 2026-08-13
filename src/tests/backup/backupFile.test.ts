@@ -5,6 +5,7 @@ import { addTimeEntry } from '../../lib/db/timeEntries';
 import { addMaterialItem } from '../../lib/db/materialItems';
 import { addPhoto } from '../../lib/db/photos';
 import { checkInWorkDay, checkOutWorkDay } from '../../lib/db/workDays';
+import { setAbsence } from '../../lib/db/absences';
 import { getAllData } from '../../lib/db/backup';
 import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../../lib/backup/backupFile';
 
@@ -38,7 +39,8 @@ describe('buildBackupFile / parseBackupFile', () => {
       timeEntryCount: 1,
       materialItemCount: 1,
       photoCount: 1,
-      workDayCount: 0
+      workDayCount: 0,
+      absenceCount: 0
     });
     expect(data.reports[0].projectNumber).toBe('2026-001');
     expect(data.reports[0].projectDescription).toBe('Test');
@@ -101,6 +103,48 @@ describe('buildBackupFile / parseBackupFile', () => {
     const restored = await getAllData();
     expect(restored.workDays).toHaveLength(1);
     expect(restored.workDays[0].id).toBe(day.id);
+  });
+
+  it('sichert und stellt Abwesenheiten (Urlaub/Krank/Zeitausgleich) im Rundlauf mit wieder her', async () => {
+    await setAbsence('2026-08-10', 'vacation', 'Sommerurlaub');
+
+    const blob = await buildBackupFile();
+    const file = new File([blob], 'backup.json', { type: 'application/json' });
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.absenceCount).toBe(1);
+    expect(data.absences).toHaveLength(1);
+    expect(data.absences[0]).toMatchObject({ date: '2026-08-10', type: 'vacation', note: 'Sommerurlaub' });
+
+    await resetTestDB();
+    await restoreBackup(data);
+
+    const restored = await getAllData();
+    expect(restored.absences).toHaveLength(1);
+    expect(restored.absences[0].date).toBe('2026-08-10');
+  });
+
+  it('liest eine v2-Sicherungsdatei ohne absences-Feld weiterhin klaglos ein (absences bleibt leer)', async () => {
+    const report = await createReport({ projectNumber: 'ALT-V2' });
+
+    // Simuliert eine v2-Sicherung (vor Einführung der Abwesenheiten): kein "absences"-Feld im JSON.
+    const v2Backup = {
+      format: 'e-servicebericht-backup-v2',
+      exportedAt: new Date().toISOString(),
+      reports: (await getAllData()).reports,
+      timeEntries: [],
+      materialItems: [],
+      photos: [],
+      workDays: []
+    };
+    const file = new File([JSON.stringify(v2Backup)], 'v2.json', { type: 'application/json' });
+
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.absenceCount).toBe(0);
+    expect(data.absences).toEqual([]);
+    expect(data.reports).toHaveLength(1);
+    expect(data.reports[0].projectNumber).toBe(report.projectNumber);
   });
 
   it('liest eine v1-Sicherungsdatei ohne workDays-Feld weiterhin klaglos ein (workDays bleibt leer)', async () => {
