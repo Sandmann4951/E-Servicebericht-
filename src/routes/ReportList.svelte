@@ -424,7 +424,7 @@
     border: none;
     font-size: 1.8rem;
     line-height: 1;
-    box-shadow: 0 8px 20px rgba(11, 95, 255, 0.4);
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;

@@ -1,22 +1,43 @@
+/*
+ * Selbst gehostete Inter-Variable-Font (Latin-Subset, deckt auch deutsche
+ * Umlaute/ß ab - die liegen in Unicode 0000-00FF) - bewusst NICHT über
+ * Google Fonts CDN eingebunden, damit die App auch offline (Kernprinzip
+ * dieser PWA) mit der richtigen Schrift lädt. Eine einzelne Variable-Font-
+ * Datei deckt den kompletten Schnittbereich 100-900 ab, daher genügt ein
+ * einziges @font-face für alle verwendeten Schriftschnitte.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/Inter-Variable-Latin.woff2') format('woff2');
+}
+
 :root {
   color-scheme: light;
-  --color-bg: #f4f6fb;
+  --color-bg: #f6f7f9;
   --color-surface: #ffffff;
   --color-surface-muted: #eef1f8;
   --color-border: #dde2ee;
-  --color-text: #1a1f2b;
-  --color-text-muted: #5b6478;
-  --color-primary: #0b5fff;
-  --color-primary-dark: #0b4fd6;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-primary: #2563eb;
+  --color-primary-dark: #1d4ed8;
   --color-primary-contrast: #ffffff;
   --color-danger: #d92d20;
-  --color-success: #12805c;
+  --color-success: #16a34a;
   --color-open: #b45309;
   --color-open-bg: #fef3c7;
-  --color-completed: #12805c;
-  --color-completed-bg: #d8f3e8;
+  --color-completed: #16a34a;
+  --color-completed-bg: #dcfce7;
   --color-signed: #0b4fd6;
   --color-signed-bg: #dbe7ff;
+  /* Neu aus dem Moodboard, aktuell noch nicht in Komponenten verdrahtet -
+     als Basis für die zweite Redesign-Runde (Icon-Set + Status-/Badge-
+     Farbfeinschliff) schon mal verfügbar. */
+  --color-highlight: #facc15;
+  --color-ink: #0d1b2a;
 
   --radius-sm: 8px;
   --radius-md: 14px;
@@ -31,11 +52,38 @@
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
 
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * Globale Überschriften-Skala (Empfehlung aus dem Moodboard). Einzelne
+ * Screens, die bereits eine eigene Kopfzeilen-Größe definieren (z.B.
+ * ReportList/Statistik), überschreiben das lokal weiterhin - diese Regel
+ * ist die Basis für neue/noch unstyled Überschriften.
+ */
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.875rem;
+  font-weight: 700;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+
+h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
 }
 
 html,

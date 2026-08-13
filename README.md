@@ -32,12 +32,22 @@ Mobile-first Progressive Web App (PWA) zur schnellen Erfassung von Serviceberich
 
 Aktuell bewusst außerhalb des Umfangs: PDF-Export, Login/Mehrbenutzer-Verwaltung, Cloud-Sync, sowie bei der Tagesstempeluhr (Phase 1+2 umgesetzt): Export der Statistik als Word/PDF, automatischer Pausenabzug nach §4 ArbZG und Fahrtzeiten-/km-Erfassung – geplant als spätere Ausbaustufen. Das Datenmodell ist aber so aufgebaut, dass sich das später ergänzen lässt, ohne die App umzubauen.
 
+## Design
+
+Die App wird schrittweise nach einem Moodboard überarbeitet. **Runde 1 (umgesetzt):**
+- Neue Farbpalette als CSS-Variablen in `src/app.css` (Akzent `#2563EB`, Erfolg `#16A34A`, Text/Hintergrund-Töne), durchgängig angewendet (Buttons, FAB, Filter-Chips, PWA-Theme-Farbe, Word-Export-Akzentfarbe, App-Icon)
+- [Inter](https://rsms.me/inter/) als Schriftart – selbst gehostet als Variable-Font-Datei (`src/assets/fonts/`, ~48 KB, deckt alle Schriftschnitte ab), bewusst **nicht** über Google Fonts CDN eingebunden, damit sie auch offline zuverlässig lädt (wird vom Service Worker mit vorgecacht)
+- Globale Überschriften-Skala (h1/h2/h3) als Basis für neue Screens
+
+**Runde 2 (geplant):** ein durchgängiges Icon-Set anstelle der aktuellen Emoji-Icons sowie ein Feinschliff der Status-/Badge-Farbsemantik (Offen/Unterschrieben/Final abgeschlossen/Nicht exportiert).
+
 ## Tech-Stack
 
 - [Vite](https://vitejs.dev/) + [Svelte 5](https://svelte.dev/) + TypeScript
 - [`idb`](https://github.com/jakearchibald/idb) als schlanker IndexedDB-Wrapper (lokale Datenhaltung, kein Backend)
 - [`docx`](https://github.com/dolanmiu/docx) für den clientseitigen Word-Export (per dynamischem Import nachgeladen, nicht im Hauptbundle)
 - [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/) für Manifest + Service Worker (Workbox)
+- [Inter](https://rsms.me/inter/) (selbst gehostete Variable-Font) als Schriftart
 - [Vitest](https://vitest.dev/) + [`fake-indexeddb`](https://github.com/dumbmatter/fakeIndexedDB) für die Tests der Datenzugriffsschicht
 
 ## Entwicklung

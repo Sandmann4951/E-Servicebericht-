@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1a73ff" />
-      <stop offset="1" stop-color="#0b4fd6" />
+      <stop offset="0" stop-color="#3b82f6" />
+      <stop offset="1" stop-color="#1d4ed8" />
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="96" fill="url(#bg)" />
   <!-- Klemmbrett als Servicebericht-Symbol -->
   <rect x="140" y="96" width="232" height="320" rx="20" fill="#ffffff" />
-  <rect x="196" y="80" width="120" height="40" rx="12" fill="#dbe6ff" />
-  <rect x="172" y="160" width="168" height="16" rx="8" fill="#c9d6f2" />
-  <rect x="172" y="196" width="168" height="16" rx="8" fill="#c9d6f2" />
-  <rect x="172" y="232" width="112" height="16" rx="8" fill="#c9d6f2" />
+  <rect x="196" y="80" width="120" height="40" rx="12" fill="#dbeafe" />
+  <rect x="172" y="160" width="168" height="16" rx="8" fill="#bfdbfe" />
+  <rect x="172" y="196" width="168" height="16" rx="8" fill="#bfdbfe" />
+  <rect x="172" y="232" width="112" height="16" rx="8" fill="#bfdbfe" />
   <!-- Blitz als Elektro-Symbol -->
-  <path d="M300 250 L232 356 L266 356 L246 432 L336 314 L298 314 Z" fill="#0b5fff" stroke="#0b4fd6" stroke-width="4" stroke-linejoin="round" />
+  <path d="M300 250 L232 356 L266 356 L246 432 L336 314 L298 314 Z" fill="#2563eb" stroke="#1d4ed8" stroke-width="4" stroke-linejoin="round" />
 </svg>

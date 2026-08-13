@@ -20,10 +20,10 @@ import type { FullReport } from './getFullReport';
 /** Breite eines eingebetteten Fotos im Dokument, in Pixeln (bei 96dpi ≈ 10,5cm). */
 const PHOTO_MAX_WIDTH_PX = 400;
 
-// Farbpalette angelehnt an das PWA-Theme (theme_color #0b5fff in vite.config.ts).
-const ACCENT = '0B5FFF';
-const ACCENT_TINT = 'EAF1FF';
-const ZEBRA_FILL = 'F4F6FB';
+// Farbpalette angelehnt an das PWA-Theme (theme_color #2563eb in vite.config.ts).
+const ACCENT = '2563EB';
+const ACCENT_TINT = 'EFF6FF';
+const ZEBRA_FILL = 'F6F7F9';
 const BORDER_COLOR = 'DDE2EE';
 const TEXT_MUTED = '5B6478';
 
