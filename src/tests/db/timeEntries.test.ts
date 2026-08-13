@@ -30,11 +30,11 @@ describe('timeEntries repository', () => {
     expect(entry.durationMinutes).toBe(90);
   });
 
-  it('ignoriert eine ungültige Zeitspanne (Ende vor Start)', async () => {
+  it('berechnet eine über Mitternacht laufende Zeitspanne korrekt (Ende vor Start = nächster Tag)', async () => {
     const report = await createReport({ projectNumber: '1' });
-    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '14:00', endTime: '09:00' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '19:05', endTime: '12:16' });
 
-    expect(entry.durationMinutes).toBeUndefined();
+    expect(entry.durationMinutes).toBe(17 * 60 + 11);
   });
 
   it('aktualisiert die Dauer neu, wenn Start/Ende geändert werden', async () => {

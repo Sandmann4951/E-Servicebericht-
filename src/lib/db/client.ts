@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { DB_NAME, DB_VERSION, type ServiceBerichtDB } from './types';
+import { computeDurationMinutes } from '../utils/date';
 
 let dbPromise: Promise<IDBPDatabase<ServiceBerichtDB>> | undefined;
 
@@ -13,7 +14,7 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
       // `oldVersion`-gegated, damit bestehende Nutzer-Datenbanken (aktuell
       // v1) sauber hochgezogen werden, statt beim Anlegen bereits
       // existierender Stores zu scheitern oder Daten zu verlieren.
-      upgrade(db, oldVersion, _newVersion, transaction) {
+      async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const reports = db.createObjectStore('reports', { keyPath: 'id' });
           reports.createIndex('projectNumber', 'projectNumber');
@@ -40,6 +41,40 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
           workDays.createIndex('date', 'date');
 
           transaction.objectStore('timeEntries').createIndex('workDayId', 'workDayId');
+        }
+        if (oldVersion < 3) {
+          // Bugfix: Zeitspannen über Mitternacht (Endzeit vor Startzeit, z.B.
+          // über Nacht vergessenes Auschecken) wurden bisher als ungültig
+          // verworfen (durationMinutes blieb undefined) statt korrekt als
+          // "geht über Mitternacht" (+24h) berechnet zu werden - siehe
+          // computeDurationMinutes() in utils/date.ts. Bereits gespeicherte
+          // Einträge werden hier einmalig mit der korrigierten Logik neu
+          // berechnet, betroffene Report-Summen (totalDurationMinutes)
+          // entsprechend nachgezogen.
+          const entriesStore = transaction.objectStore('timeEntries');
+          const reportsStore = transaction.objectStore('reports');
+          const affectedReportIds = new Set<string>();
+
+          let cursor = await entriesStore.openCursor();
+          while (cursor) {
+            const entry = cursor.value;
+            if (entry.startTime && entry.endTime) {
+              const recomputed = computeDurationMinutes(entry.startTime, entry.endTime);
+              if (recomputed !== entry.durationMinutes) {
+                await cursor.update({ ...entry, durationMinutes: recomputed });
+                if (entry.reportId) affectedReportIds.add(entry.reportId);
+              }
+            }
+            cursor = await cursor.continue();
+          }
+
+          for (const reportId of affectedReportIds) {
+            const report = await reportsStore.get(reportId);
+            if (!report) continue;
+            const entries = await entriesStore.index('reportId').getAll(reportId);
+            report.totalDurationMinutes = entries.reduce((sum, e) => sum + (e.durationMinutes ?? 0), 0);
+            await reportsStore.put(report);
+          }
         }
       }
     });

@@ -143,4 +143,4 @@ export interface ServiceBerichtDB extends DBSchema {
 }
 
 export const DB_NAME = 'e-servicebericht-db';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;

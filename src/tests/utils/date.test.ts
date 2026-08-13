@@ -6,8 +6,14 @@ describe('computeDurationMinutes', () => {
     expect(computeDurationMinutes('08:00', '16:30')).toBe(510);
   });
 
-  it('liefert undefined bei Ende vor Start', () => {
-    expect(computeDurationMinutes('16:00', '08:00')).toBeUndefined();
+  it('interpretiert eine Endzeit vor der Startzeit als Zeitspanne über Mitternacht', () => {
+    // 19:05 bis 12:16 (nächster Tag) - z.B. vergessenes Auschecken über Nacht
+    expect(computeDurationMinutes('19:05', '12:16')).toBe(17 * 60 + 11);
+    expect(computeDurationMinutes('16:00', '08:00')).toBe(16 * 60);
+  });
+
+  it('liefert 0 bei identischer Start-/Endzeit', () => {
+    expect(computeDurationMinutes('08:00', '08:00')).toBe(0);
   });
 
   it('liefert undefined bei ungültigem Format', () => {

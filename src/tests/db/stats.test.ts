@@ -35,12 +35,23 @@ describe('getDayStats', () => {
     expect(stats[0]).toEqual({ date: '2026-08-11', productiveMinutes: 105, idleMinutes: 0, totalMinutes: 105 });
   });
 
-  it('ignoriert Einträge ohne Dauer (laufende Session, ungültige Zeitspanne)', async () => {
+  it('ignoriert Einträge ohne Dauer (noch offene, laufende Session)', async () => {
     const report = await createReport({ projectNumber: 'A' });
     await addTimeEntry(report.id, { date: '2026-08-12', startTime: '08:00' }); // noch offen, keine Dauer
-    await addTimeEntry(report.id, { date: '2026-08-12', startTime: '14:00', endTime: '09:00' }); // ungültig
 
     expect(await getDayStats()).toEqual([]);
+  });
+
+  it('zählt eine über Mitternacht laufende Zeitspanne auf dem Start-Datum des Eintrags', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    // 19:05 bis 12:16 (nächster Tag), z.B. über Nacht vergessenes Auschecken
+    await addTimeEntry(report.id, { date: '2026-08-12', startTime: '19:05', endTime: '12:16' });
+
+    const stats = await getDayStats();
+
+    expect(stats).toEqual([
+      { date: '2026-08-12', productiveMinutes: 17 * 60 + 11, idleMinutes: 0, totalMinutes: 17 * 60 + 11 }
+    ]);
   });
 
   it('liefert die Tage sortiert nach Datum aufsteigend, über mehrere Monate hinweg', async () => {

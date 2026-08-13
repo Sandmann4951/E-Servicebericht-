@@ -32,16 +32,21 @@ export function parseTimeToMinutes(value: string): number | undefined {
 
 /**
  * Berechnet die Dauer in Minuten zwischen zwei "HH:mm"-Zeiten. Liefert
- * `undefined` bei ungültigem Format oder wenn das Ende vor dem Start liegt
- * (z.B. Tippfehler) - in dem Fall bleibt ein zuvor manuell gesetzter Wert
- * unangetastet, statt einen negativen/falschen Wert zu speichern.
+ * `undefined` bei ungültigem Format. Liegt die Endzeit VOR der Startzeit
+ * (z.B. Start 19:05, Ende 12:16), wird das als Zeitspanne über Mitternacht
+ * hinweg interpretiert und um 24h ergänzt (19:05–12:16 -> 17:11 Std.) - sowohl
+ * die Tagesstempeluhr (Über-Nacht-Schicht, vergessenes Auschecken) als auch
+ * manuell erfasste Zeiten können das brauchen. `TimeEntry` kennt kein eigenes
+ * End-Datum, daher landet die volle Dauer auf dem Start-Datum des Eintrags -
+ * für Statistiken bewusst in Kauf genommen, statt das Datenmodell dafür zu
+ * erweitern (seltener Fall).
  */
 export function computeDurationMinutes(startTime: string, endTime: string): number | undefined {
   const start = parseTimeToMinutes(startTime);
   const end = parseTimeToMinutes(endTime);
   if (start === undefined || end === undefined) return undefined;
   const diff = end - start;
-  return diff >= 0 ? diff : undefined;
+  return diff >= 0 ? diff : diff + 24 * 60;
 }
 
 /** Formatiert Minuten als "H:MM Std." für die Anzeige (z.B. "7:30 Std."). */
