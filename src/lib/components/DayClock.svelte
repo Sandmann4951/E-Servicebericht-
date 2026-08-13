@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getActiveWorkDay } from '../db/workDays';
-  import { getGloballyActiveTimeEntry, listTimeEntriesForWorkDay } from '../db/timeEntries';
+  import { getGloballyActiveTimeEntry, listTimeEntriesForDate } from '../db/timeEntries';
   import { getReport, listReports } from '../db/reports';
   import type { WorkDay, TimeEntry, ServiceReport } from '../db/types';
   import { checkInDay, checkOutDay, switchToProject, startProjectByNumber, type DaySummary } from '../clockActions';
@@ -58,18 +58,21 @@
   }
 
   /**
-   * Summiert alle Zeitabschnitte des laufenden Tages zu Gesamt-/Projekt-/
-   * Leerlaufzeit - inklusive des gerade offenen Abschnitts (dessen Dauer erst
-   * beim Schließen als `durationMinutes` gespeichert wird, bis dahin wird sie
-   * hier live aus Start- bis Jetzt-Zeit nachgerechnet). Läuft leer, solange
-   * kein Tag aktiv ist.
+   * Summiert alle Zeitabschnitte des laufenden KALENDERTAGES (nicht nur
+   * dieses einen WorkDay-Datensatzes - wurde am selben Tag bereits einmal
+   * aus- und wieder eingestempelt, zählen dessen Einträge mit, siehe
+   * listTimeEntriesForDate()) zu Gesamt-/Projekt-/Leerlaufzeit - inklusive
+   * des gerade offenen Abschnitts (dessen Dauer erst beim Schließen als
+   * `durationMinutes` gespeichert wird, bis dahin wird sie hier live aus
+   * Start- bis Jetzt-Zeit nachgerechnet). Läuft leer, solange kein Tag aktiv
+   * ist.
    */
   async function loadTodaySummary(): Promise<void> {
     if (!workDay) {
       todaySummary = undefined;
       return;
     }
-    const entries = await listTimeEntriesForWorkDay(workDay.id);
+    const entries = await listTimeEntriesForDate(workDay.date);
     let projectMinutes = 0;
     let idleMinutes = 0;
     for (const entry of entries) {

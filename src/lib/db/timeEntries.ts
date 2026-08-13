@@ -45,6 +45,22 @@ export async function listTimeEntriesForWorkDay(workDayId: ID): Promise<TimeEntr
 }
 
 /**
+ * Alle über die Tagesstempeluhr entstandenen Zeiteinträge (workDayId gesetzt)
+ * eines Kalendertages, sortiert nach Startzeit - bewusst NICHT auf einen
+ * einzelnen Tagesstempel (WorkDay) beschränkt: wird am selben Tag
+ * aus- und wieder eingestempelt, entsteht dabei ein weiterer WorkDay-
+ * Datensatz mit demselben `date`, dessen Einträge hier trotzdem mitzählen -
+ * die Tagesbilanz (checkOutDay()/"Heute bisher" in DayClock.svelte) soll
+ * erst mit dem nächsten Kalendertag wieder bei 0 anfangen, nicht bei jedem
+ * erneuten Einstempeln am selben Tag.
+ */
+export async function listTimeEntriesForDate(date: string): Promise<TimeEntry[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'date', date);
+  return entries.filter((entry) => entry.workDayId !== undefined).sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
+}
+
+/**
  * Alle abgeschlossenen (mit endTime), noch keinem Projekt zugeordneten
  * Leerlaufzeit-Einträge - für die nachträgliche Zuordnung. Die aktuell noch
  * laufende Leerlaufzeit (falls vorhanden) wird bewusst ausgeschlossen, da sie

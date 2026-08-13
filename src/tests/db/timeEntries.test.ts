@@ -8,6 +8,7 @@ import {
   getActiveTimeEntry,
   getGloballyActiveTimeEntry,
   listTimeEntries,
+  listTimeEntriesForDate,
   updateTimeEntry
 } from '../../lib/db/timeEntries';
 
@@ -232,5 +233,59 @@ describe('findOverlappingTimeEntries (Plausibilitätsprüfung)', () => {
 
     const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '10:00', entry.id);
     expect(overlaps).toEqual([]);
+  });
+});
+
+describe('listTimeEntriesForDate (Tagesbilanz über mehrere Tagesstempel-Zyklen hinweg)', () => {
+  it('liefert eine leere Liste ohne Einträge an dem Tag', async () => {
+    expect(await listTimeEntriesForDate('2026-08-11')).toEqual([]);
+  });
+
+  it('fasst Einträge mit unterschiedlicher workDayId, aber gleichem Datum zusammen', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(undefined, {
+      date: '2026-08-11',
+      startTime: '08:00',
+      endTime: '08:30',
+      workDayId: 'workday-1'
+    });
+    await addTimeEntry(report.id, {
+      date: '2026-08-11',
+      startTime: '09:00',
+      endTime: '09:45',
+      workDayId: 'workday-2'
+    });
+
+    const entries = await listTimeEntriesForDate('2026-08-11');
+
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => e.workDayId).sort()).toEqual(['workday-1', 'workday-2']);
+  });
+
+  it('ignoriert manuelle Einträge ohne workDayId', async () => {
+    const report = await createReport({ projectNumber: '1' });
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '09:00' }); // manuell, keine workDayId
+
+    expect(await listTimeEntriesForDate('2026-08-11')).toEqual([]);
+  });
+
+  it('ignoriert Einträge an anderen Tagen', async () => {
+    await addTimeEntry(undefined, {
+      date: '2026-08-10',
+      startTime: '08:00',
+      endTime: '09:00',
+      workDayId: 'workday-1'
+    });
+
+    expect(await listTimeEntriesForDate('2026-08-11')).toEqual([]);
+  });
+
+  it('sortiert nach Startzeit', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-11', startTime: '14:00', endTime: '15:00', workDayId: 'w2' });
+    await addTimeEntry(undefined, { date: '2026-08-11', startTime: '08:00', endTime: '09:00', workDayId: 'w1' });
+
+    const entries = await listTimeEntriesForDate('2026-08-11');
+
+    expect(entries.map((e) => e.startTime)).toEqual(['08:00', '14:00']);
   });
 });

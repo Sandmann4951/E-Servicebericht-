@@ -14,9 +14,10 @@ import {
   getGloballyActiveTimeEntry,
   listTimeEntries,
   listTimeEntriesForWorkDay,
-  listUnassignedIdleEntries
+  listUnassignedIdleEntries,
+  updateTimeEntry
 } from '../lib/db/timeEntries';
-import { checkInWorkDay, getActiveWorkDay } from '../lib/db/workDays';
+import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from '../lib/db/workDays';
 import { todayISODate } from '../lib/utils/date';
 
 beforeEach(async () => {
@@ -189,6 +190,47 @@ describe('checkOutDay', () => {
     expect(summary?.idleMinutes).toBe(45);
     expect(summary?.projectMinutes).toBe(90);
     expect(summary?.totalMinutes).toBe(135);
+  });
+
+  it('kumuliert über mehrere Aus-/Wiedereinstempel-Zyklen am selben Kalendertag, statt bei 0 neu anzufangen', async () => {
+    // Erster Zyklus: einstempeln, 30 Min Leerlaufzeit, wieder ausstempeln.
+    await checkInDay();
+    let entry = await getGloballyActiveTimeEntry();
+    await updateTimeEntry(entry!.id, { startTime: '08:00', endTime: '08:30' });
+    const firstSummary = await checkOutDay();
+    expect(firstSummary?.totalMinutes).toBe(30);
+
+    // Zweiter Zyklus, selber Tag: erneut einstempeln (neuer WorkDay-Datensatz,
+    // aber gleiches Datum) und weitere 45 Min Leerlaufzeit.
+    await checkInDay();
+    entry = await getGloballyActiveTimeEntry();
+    await updateTimeEntry(entry!.id, { startTime: '09:00', endTime: '09:45' });
+    const secondSummary = await checkOutDay();
+
+    // Die Tagesbilanz muss beide Zyklen zusammenzählen (30 + 45 = 75), nicht
+    // nur den zweiten Zyklus isoliert (was auf 45 zurückfallen würde).
+    expect(secondSummary?.totalMinutes).toBe(75);
+    expect(secondSummary?.idleMinutes).toBe(75);
+    expect(secondSummary?.workDay.id).not.toBe(firstSummary?.workDay.id);
+  });
+
+  it('zählt nur Einträge des jeweiligen Kalendertages, nicht anderer Tage', async () => {
+    const yesterday = await checkInWorkDay();
+    await addTimeEntry(undefined, {
+      date: '2020-01-01',
+      startTime: '08:00',
+      endTime: '09:00',
+      workDayId: yesterday.id
+    });
+    await checkOutWorkDay(yesterday.id);
+
+    await checkInDay();
+    const entry = await getGloballyActiveTimeEntry();
+    await updateTimeEntry(entry!.id, { startTime: '08:00', endTime: '08:20' });
+
+    const summary = await checkOutDay();
+
+    expect(summary?.totalMinutes).toBe(20);
   });
 });
 

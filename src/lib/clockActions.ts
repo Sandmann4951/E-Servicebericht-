@@ -1,5 +1,5 @@
 import { createReport, getReport, listReportsByProjectNumber } from './db/reports';
-import { addTimeEntry, getGloballyActiveTimeEntry, listTimeEntriesForWorkDay, updateTimeEntry } from './db/timeEntries';
+import { addTimeEntry, getGloballyActiveTimeEntry, listTimeEntriesForDate, updateTimeEntry } from './db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
 import type { ID, ServiceReport, WorkDay } from './db/types';
 import { nowHHmm, todayISODate } from './utils/date';
@@ -30,6 +30,13 @@ export async function checkInDay(): Promise<WorkDay> {
  * Schließt den aktuell offenen Abschnitt (Leerlaufzeit oder Projekt) und
  * beendet den Tagesstempel. Gibt die Tageszusammenfassung zurück, oder
  * `undefined`, wenn gerade gar kein Tag läuft.
+ *
+ * Die Zusammenfassung umfasst bewusst den GANZEN Kalendertag (`active.date`),
+ * nicht nur diesen einen WorkDay-Datensatz: wurde am selben Tag bereits
+ * einmal aus- und wieder eingestempelt, entstehen dabei mehrere WorkDay-
+ * Einträge mit demselben Datum - deren Zeiten sollen sich zur Tagesbilanz
+ * addieren, statt bei jedem erneuten Einstempeln wieder bei 0 anzufangen
+ * (siehe listTimeEntriesForDate()).
  */
 export async function checkOutDay(): Promise<DaySummary | undefined> {
   const active = await getActiveWorkDay();
@@ -43,7 +50,7 @@ export async function checkOutDay(): Promise<DaySummary | undefined> {
   const closedDay = await checkOutWorkDay(active.id);
   if (!closedDay) return undefined;
 
-  const entries = await listTimeEntriesForWorkDay(active.id);
+  const entries = await listTimeEntriesForDate(active.date);
   let projectMinutes = 0;
   let idleMinutes = 0;
   for (const entry of entries) {
