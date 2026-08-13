@@ -60,7 +60,7 @@ export async function listReports(filter: ReportFilter = 'all'): Promise<Service
 /**
  * Alle Berichte mit exakt dieser Projektnummer (jeder Status), älteste
  * zuerst - Grundlage für die "X. Bericht zu diesem Projekt"-Anzeige und die
- * Duplikat-Prüfung beim Direkt-Einstempeln (siehe startProjectByNumber() in
+ * Duplikat-Prüfung beim Direkt-Einchecken (siehe startProjectByNumber() in
  * clockActions.ts). Nutzt den bereits vorhandenen `projectNumber`-Index,
  * kein Schema-Änderung nötig.
  */

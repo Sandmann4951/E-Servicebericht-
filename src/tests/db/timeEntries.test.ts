@@ -126,13 +126,13 @@ describe('Leerlaufzeit-Einträge (reportId === undefined)', () => {
   });
 });
 
-describe('getActiveTimeEntry (Ein-/Ausstempeln)', () => {
+describe('getActiveTimeEntry (Ein-/Auschecken)', () => {
   it('liefert undefined ohne laufenden Eintrag', async () => {
     const report = await createReport({ projectNumber: '1' });
     expect(await getActiveTimeEntry(report.id)).toBeUndefined();
   });
 
-  it('erkennt einen eingestempelten Eintrag ohne Endzeit als aktiv', async () => {
+  it('erkennt einen eingecheckten Eintrag ohne Endzeit als aktiv', async () => {
     const report = await createReport({ projectNumber: '1' });
     const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
 
@@ -140,7 +140,7 @@ describe('getActiveTimeEntry (Ein-/Ausstempeln)', () => {
     expect(active?.id).toBe(entry.id);
   });
 
-  it('ist nicht mehr aktiv, sobald ausgestempelt wurde', async () => {
+  it('ist nicht mehr aktiv, sobald ausgecheckt wurde', async () => {
     const report = await createReport({ projectNumber: '1' });
     const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
     await updateTimeEntry(entry.id, { endTime: '16:00' });
@@ -173,7 +173,7 @@ describe('getGloballyActiveTimeEntry (nur eine Stempel-Session gleichzeitig)', (
     expect(active?.reportId).toBe(reportA.id);
   });
 
-  it('ist undefined, nachdem in allen Berichten ausgestempelt wurde', async () => {
+  it('ist undefined, nachdem in allen Berichten ausgecheckt wurde', async () => {
     const report = await createReport({ projectNumber: '1' });
     const entry = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00' });
     await updateTimeEntry(entry.id, { endTime: '16:00' });
@@ -219,7 +219,7 @@ describe('findOverlappingTimeEntries (Plausibilitätsprüfung)', () => {
 
   it('ignoriert Einträge ohne beide Zeiten (laufende Session, reiner Dauer-Eintrag)', async () => {
     const report = await createReport({ projectNumber: '1' });
-    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00' }); // noch eingestempelt
+    await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00' }); // noch eingecheckt
     await addTimeEntry(report.id, { date: '2026-08-11', durationMinutes: 60 }); // nur manuelle Dauer
 
     const overlaps = await findOverlappingTimeEntries('2026-08-11', '08:00', '10:00');

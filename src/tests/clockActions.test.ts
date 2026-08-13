@@ -45,7 +45,7 @@ describe('checkInDay', () => {
 });
 
 describe('switchToProject', () => {
-  it('startet transparent den Tag, wenn noch keiner läuft ("Direkt einstempeln")', async () => {
+  it('startet transparent den Tag, wenn noch keiner läuft ("Direkt einchecken")', async () => {
     const report = await createReport({ projectNumber: 'A' });
 
     const result = await switchToProject(report.id);
@@ -111,7 +111,7 @@ describe('switchToProject', () => {
     vi.unstubAllGlobals();
   });
 
-  it('fragt nicht nach, wenn bereits im selben Bericht eingestempelt ist', async () => {
+  it('fragt nicht nach, wenn bereits im selben Bericht eingecheckt ist', async () => {
     const report = await createReport({ projectNumber: 'A' });
     await switchToProject(report.id);
     const confirmSpy = vi.fn(() => true);

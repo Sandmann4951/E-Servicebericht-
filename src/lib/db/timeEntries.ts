@@ -60,7 +60,7 @@ export async function listUnassignedIdleEntries(): Promise<TimeEntry[]> {
 }
 
 /**
- * Der aktuell "laufende" Zeiteintrag eines Berichts fürs Ein-/Ausstempeln -
+ * Der aktuell "laufende" Zeiteintrag eines Berichts fürs Ein-/Auschecken -
  * also ein Eintrag mit gesetzter Startzeit, aber noch ohne Endzeit. Es sollte
  * normalerweise höchstens einen geben; falls doch mehrere existieren (z.B.
  * durch manuelle Bearbeitung), wird der zuletzt begonnene zurückgegeben.
@@ -74,7 +74,7 @@ export async function getActiveTimeEntry(reportId: ID): Promise<TimeEntry | unde
 /**
  * Der aktuell laufende Zeiteintrag über ALLE Berichte (und Leerlaufzeit)
  * hinweg - damit lässt sich verhindern, dass man gleichzeitig in mehreren
- * Berichten eingestempelt ist. `reportId === undefined` bedeutet, dass
+ * Berichten eingecheckt ist. `reportId === undefined` bedeutet, dass
  * gerade Leerlaufzeit läuft. Es sollte höchstens einen geben; falls doch
  * mehrere existieren, wird der zuletzt begonnene zurückgegeben.
  */

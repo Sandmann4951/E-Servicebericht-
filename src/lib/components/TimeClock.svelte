@@ -23,7 +23,7 @@
     load();
   });
 
-  // Während eingestempelt ist, die Anzeige regelmäßig auffrischen, damit die
+  // Während eingecheckt ist, die Anzeige regelmäßig auffrischen, damit die
   // gelaufene Zeit sichtbar mitläuft (kein aufwendiges Live-Ticking pro
   // Sekunde nötig - alle 30s reicht für eine Zeiterfassungs-Anzeige völlig).
   $effect(() => {
@@ -76,17 +76,17 @@
       <div class="active-badge">
         <span class="dot"></span>
         <span>
-          Eingestempelt seit {activeEntry.startTime}
+          Eingecheckt seit {activeEntry.startTime}
           {#if elapsedMinutes !== undefined}· {formatDurationMinutes(elapsedMinutes)}{/if}
         </span>
       </div>
       {#if !locked}
-        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}>⏹ Ausstempeln</button>
+        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}>⏹ Auschecken</button>
       {/if}
     {:else if locked}
       <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>
     {:else}
-      <button type="button" class="clock-in" onclick={clockIn} disabled={busy}>▶️ Einstempeln</button>
+      <button type="button" class="clock-in" onclick={clockIn} disabled={busy}>▶️ Einchecken</button>
     {/if}
   </div>
 {/if}

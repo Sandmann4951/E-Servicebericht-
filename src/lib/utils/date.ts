@@ -2,9 +2,10 @@
 
 /**
  * Heutiges Datum in der lokalen Zeitzone als "YYYY-MM-DD" (für
- * input[type=date]-Defaultwerte und fürs Einstempeln). Bewusst NICHT über
- * `toISOString()` (das liefert UTC) - sonst würde z.B. für jemanden in
- * Deutschland kurz nach lokaler Mitternacht noch der Vortag zurückgegeben.
+ * input[type=date]-Defaultwerte sowie fürs Tages-Ein-/Ausstempeln und
+ * Projekt-Ein-/Auschecken). Bewusst NICHT über `toISOString()` (das liefert
+ * UTC) - sonst würde z.B. für jemanden in Deutschland kurz nach lokaler
+ * Mitternacht noch der Vortag zurückgegeben.
  */
 export function todayISODate(): string {
   const now = new Date();
@@ -14,7 +15,7 @@ export function todayISODate(): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Aktuelle Uhrzeit (lokale Zeitzone) als "HH:mm" - fürs Ein-/Ausstempeln. */
+/** Aktuelle Uhrzeit (lokale Zeitzone) als "HH:mm" - fürs Tages-Ein-/Ausstempeln und Projekt-Ein-/Auschecken. */
 export function nowHHmm(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;

@@ -56,8 +56,8 @@ export async function checkOutDay(): Promise<DaySummary | undefined> {
 
 /**
  * Wechselt in ein Projekt: startet bei Bedarf transparent den Tagesstempel
- * (der bisherige "Direkt einstempeln"-Schnellzugriff ohne expliziten
- * Tages-Check-in funktioniert dadurch unverändert weiter), schließt den
+ * (der bisherige "Direkt einchecken"-Schnellzugriff ohne explizites
+ * Tages-Einstempeln funktioniert dadurch unverändert weiter), schließt den
  * aktuell offenen Abschnitt und öffnet einen neuen Projekt-Zeitabschnitt.
  * Bricht ab, wenn der Ziel-Bericht gesperrt ist. Fragt nur beim Wechsel
  * zwischen zwei VERSCHIEDENEN Projekten noch einmal nach (schützt vor
@@ -78,7 +78,7 @@ export async function switchToProject(reportId: ID): Promise<boolean> {
     const currentReport = await getReport(current.reportId);
     const label = currentReport?.projectNumber ?? 'einem anderen Bericht';
     const confirmed = confirm(
-      `Du bist noch in "${label}" eingestempelt (seit ${current.startTime}). Dort jetzt ausstempeln und hier neu einstempeln?`
+      `Du bist noch in "${label}" eingecheckt (seit ${current.startTime}). Dort jetzt auschecken und hier neu einchecken?`
     );
     if (!confirmed) return false;
   }
@@ -120,7 +120,7 @@ export interface StartProjectResult {
 }
 
 /**
- * Löst eine per Hand eingegebene Projektnummer (Direkt-Einstempeln-
+ * Löst eine per Hand eingegebene Projektnummer (Direkt-Einchecken-
  * Schnellzugriff) zu einem Bericht auf - für den Fall, dass es zu dieser
  * Nummer bereits Berichte gibt (wiederkehrender Kunde/Standort):
  *

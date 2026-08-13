@@ -18,7 +18,7 @@
   /** Nur zum periodischen Neuberechnen der Anzeige - kein eigener Nutzwert. */
   let tick = $state(0);
 
-  // Auswahl-Panel für "Direkt einstempeln": zeigt zuerst die noch offenen
+  // Auswahl-Panel für "Direkt einchecken": zeigt zuerst die noch offenen
   // Berichte zur Auswahl, statt sofort nach einer neuen Projektnummer zu
   // fragen - erspart ein versehentliches Duplikat, wenn an einem bereits
   // laufenden Projekt weitergearbeitet wird.
@@ -95,7 +95,7 @@
   }
 
   /**
-   * Öffnet das Auswahl-Panel für "Direkt einstempeln": lädt zuerst die noch
+   * Öffnet das Auswahl-Panel für "Direkt einchecken": lädt zuerst die noch
    * offenen Berichte, damit man an einem bereits laufenden Projekt
    * weiterarbeiten kann, ohne aus Versehen ein Duplikat mit derselben
    * Projektnummer anzulegen. Passt zu keinem davon (oder ist es das erste
@@ -165,7 +165,7 @@
   <div class="day-clock">
     {#if daySummary}
       <div class="day-summary">
-        <p class="day-summary-title">✅ Tag ausgecheckt</p>
+        <p class="day-summary-title">✅ Tag ausgestempelt</p>
         <div class="stats">
           <div class="stat"><strong>{formatDurationMinutes(daySummary.totalMinutes)}</strong><span>Gesamt</span></div>
           <div class="stat"><strong>{formatDurationMinutes(daySummary.projectMinutes)}</strong><span>Projekt</span></div>
@@ -179,7 +179,7 @@
       <button type="button" class="active-session" onclick={() => navigate(`/reports/${activeReport?.id}`)}>
         <span class="dot"></span>
         <span>
-          Eingestempelt in „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
+          Eingecheckt in „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
           {#if elapsedMinutes !== undefined}· {formatDurationMinutes(elapsedMinutes)}{/if}
         </span>
       </button>
@@ -199,11 +199,11 @@
       {/if}
       {#if !activeReport}
         <button type="button" class="quick-clock-in" onclick={openPicker} disabled={quickClockInBusy}>
-          + Direkt in Projekt einstempeln
+          + Direkt in Projekt einchecken
         </button>
       {/if}
       {#if workDay}
-        <button type="button" class="check-out" onclick={checkOut} disabled={busy}>⏹ Tag auschecken</button>
+        <button type="button" class="check-out" onclick={checkOut} disabled={busy}>⏹ Tag ausstempeln</button>
       {/if}
     </div>
 
