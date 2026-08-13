@@ -7,6 +7,7 @@
   import { getTechnicianName } from '../settings';
   import { navigate } from '../router.svelte';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
+  import Icon from './Icon.svelte';
 
   /** Optional: informiert die Elternkomponente (ReportList), wenn sich der Eingecheckt-Status geändert haben könnte - z.B. für die Anpinnen/Hervorheben-Anzeige in der Berichtsliste. */
   let { onChanged = () => {} }: { onChanged?: () => void } = $props();
@@ -215,7 +216,7 @@
   <div class="day-clock">
     {#if daySummary}
       <div class="day-summary">
-        <p class="day-summary-title">✅ Tag ausgestempelt</p>
+        <p class="day-summary-title"><Icon name="check-circle" size={16} />Tag ausgestempelt</p>
         <div class="stats">
           <div class="stat"><strong>{formatDurationMinutes(daySummary.totalMinutes)}</strong><span>Gesamt</span></div>
           <div class="stat project-stat">
@@ -262,7 +263,7 @@
 
     <div class="day-actions">
       {#if !workDay}
-        <button type="button" class="check-in" onclick={checkIn} disabled={busy}>▶️ Tag einstempeln</button>
+        <button type="button" class="check-in" onclick={checkIn} disabled={busy}><Icon name="play" size={16} />Tag einstempeln</button>
       {/if}
       {#if !activeReport}
         <button type="button" class="quick-clock-in" onclick={openPicker} disabled={quickClockInBusy}>
@@ -270,7 +271,7 @@
         </button>
       {/if}
       {#if workDay}
-        <button type="button" class="check-out" onclick={checkOut} disabled={busy}>⏹ Tag ausstempeln</button>
+        <button type="button" class="check-out" onclick={checkOut} disabled={busy}><Icon name="stop" size={16} />Tag ausstempeln</button>
       {/if}
     </div>
 
@@ -330,6 +331,9 @@
 
   .day-summary-title {
     margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 700;
     color: var(--color-completed);
   }
@@ -445,6 +449,10 @@
   .quick-clock-in {
     flex: 1;
     min-width: 140px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     border: none;
     border-radius: var(--radius-md);
     padding: var(--space-3) var(--space-4);

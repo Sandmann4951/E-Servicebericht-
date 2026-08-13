@@ -2,6 +2,7 @@
   import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, todayISODate } from '../lib/utils/date';
+  import Icon from '../lib/components/Icon.svelte';
 
   type View = 'tag' | 'monat' | 'jahr';
 
@@ -130,7 +131,7 @@
 
 <div class="screen">
   <header class="header">
-    <button type="button" class="back" onclick={() => navigate('/')} aria-label="Zurück zur Übersicht">←</button>
+    <button type="button" class="back" onclick={() => navigate('/')} aria-label="Zurück zur Übersicht"><Icon name="back" /></button>
     <h1>Statistik</h1>
   </header>
 
@@ -146,13 +147,13 @@
     {:else if view === 'tag'}
       <div class="nav">
         <button type="button" onclick={() => (selectedDate = shiftDate(selectedDate, -1))} aria-label="Vorheriger Tag">
-          ‹
+          <Icon name="chevron-left" />
         </button>
         <button type="button" class="nav-label" onclick={() => (selectedDate = today)}>
           {formatDateLongDE(selectedDate)}
         </button>
         <button type="button" onclick={() => (selectedDate = shiftDate(selectedDate, 1))} aria-label="Nächster Tag">
-          ›
+          <Icon name="chevron-right" />
         </button>
       </div>
 
@@ -190,13 +191,13 @@
           onclick={() => (selectedMonth = shiftMonth(selectedMonth, -1))}
           aria-label="Vorheriger Monat"
         >
-          ‹
+          <Icon name="chevron-left" />
         </button>
         <button type="button" class="nav-label" onclick={() => (selectedMonth = today.slice(0, 7))}>
           {formatMonthDE(selectedMonth)}
         </button>
         <button type="button" onclick={() => (selectedMonth = shiftMonth(selectedMonth, 1))} aria-label="Nächster Monat">
-          ›
+          <Icon name="chevron-right" />
         </button>
       </div>
 
@@ -220,11 +221,11 @@
       {/if}
     {:else}
       <div class="nav">
-        <button type="button" onclick={() => (selectedYear -= 1)} aria-label="Vorheriges Jahr">‹</button>
+        <button type="button" onclick={() => (selectedYear -= 1)} aria-label="Vorheriges Jahr"><Icon name="chevron-left" /></button>
         <button type="button" class="nav-label" onclick={() => (selectedYear = Number(today.slice(0, 4)))}>
           {selectedYear}
         </button>
-        <button type="button" onclick={() => (selectedYear += 1)} aria-label="Nächstes Jahr">›</button>
+        <button type="button" onclick={() => (selectedYear += 1)} aria-label="Nächstes Jahr"><Icon name="chevron-right" /></button>
       </div>
 
       {#if yearTotal.totalMinutes === 0}
@@ -340,6 +341,9 @@
 
   .nav > button:first-child,
   .nav > button:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);

@@ -5,6 +5,7 @@
   import type { ServiceReport, TimeEntry } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDateDE, formatDurationMinutes } from '../lib/utils/date';
+  import Icon from '../lib/components/Icon.svelte';
 
   let entries = $state<TimeEntry[]>([]);
   let loading = $state(true);
@@ -64,7 +65,7 @@
 
 <div class="screen">
   <header class="header">
-    <button type="button" class="back" onclick={() => navigate('/')} aria-label="Zurück zur Übersicht">←</button>
+    <button type="button" class="back" onclick={() => navigate('/')} aria-label="Zurück zur Übersicht"><Icon name="back" /></button>
     <h1>Leerlaufzeiten</h1>
   </header>
 

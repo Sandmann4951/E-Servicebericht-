@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useRegisterSW } from 'virtual:pwa-register/svelte';
+  import Icon from './Icon.svelte';
 
   // registerType: 'prompt' (siehe vite.config.ts) - kein automatischer
   // Reload mitten in der Eingabe eines Berichts. Stattdessen zeigen wir
@@ -36,14 +37,14 @@
     <div class="toast" role="status">
       <span>Neue Version verfügbar.</span>
       <button type="button" class="primary" onclick={reload}>Aktualisieren</button>
-      <button type="button" class="close" onclick={close} aria-label="Schließen">✕</button>
+      <button type="button" class="close" onclick={close} aria-label="Schließen"><Icon name="close" size={16} /></button>
     </div>
   </div>
 {:else if $offlineReady}
   <div class="toast-wrap">
     <div class="toast" role="status">
       <span>Bereit für den Offline-Einsatz.</span>
-      <button type="button" class="close" onclick={close} aria-label="Schließen">✕</button>
+      <button type="button" class="close" onclick={close} aria-label="Schließen"><Icon name="close" size={16} /></button>
     </div>
   </div>
 {/if}

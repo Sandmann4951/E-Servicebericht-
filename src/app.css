@@ -31,13 +31,24 @@
   --color-open-bg: #fef3c7;
   --color-completed: #16a34a;
   --color-completed-bg: #dcfce7;
-  --color-signed: #0b4fd6;
-  --color-signed-bg: #dbe7ff;
-  /* Neu aus dem Moodboard, aktuell noch nicht in Komponenten verdrahtet -
-     als Basis für die zweite Redesign-Runde (Icon-Set + Status-/Badge-
-     Farbfeinschliff) schon mal verfügbar. */
   --color-highlight: #facc15;
   --color-ink: #0d1b2a;
+  /* "Unterschrieben" (vom Kunden signiert) - an --color-primary angeglichen
+     (vorher noch das alte Vor-Redesign-Blau #0b4fd6). */
+  --color-signed: #1d4ed8;
+  --color-signed-bg: #dbe7ff;
+  /* "Final abgeschlossen" (manuell ohne Unterschrift gesperrt) - bewusst
+     ANDERE Farbe als "Unterschrieben": beide sperren den Bericht, aber nur
+     bei der Unterschrift hat der Kunde aktiv zugestimmt. Nutzt den
+     Moodboard-Ton --color-ink statt --color-signed, damit auf einen Blick
+     erkennbar ist, welche der beiden Sperr-Varianten vorliegt. */
+  --color-finalized: var(--color-ink);
+  --color-finalized-bg: #e2e8f0;
+  /* "Nicht exportiert"-Hinweis auf abgeschlossenen Berichten - bewusst
+     zurückhaltend/neutral statt alarmierend, da es kein Fehler ist, sondern
+     nur eine Erinnerung. */
+  --color-unexported: var(--color-text-muted);
+  --color-unexported-bg: var(--color-surface-muted);
 
   --radius-sm: 8px;
   --radius-md: 14px;

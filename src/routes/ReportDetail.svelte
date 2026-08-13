@@ -22,6 +22,7 @@
   import MaterialSection from '../lib/components/MaterialSection.svelte';
   import PhotoSection from '../lib/components/PhotoSection.svelte';
   import SignatureSection from '../lib/components/SignatureSection.svelte';
+  import Icon from '../lib/components/Icon.svelte';
 
   let { id }: { id: string } = $props();
 
@@ -406,10 +407,10 @@
 
 <div class="screen">
   <header class="header">
-    <button type="button" class="back" onclick={back} aria-label="Zurück zur Liste">←</button>
+    <button type="button" class="back" onclick={back} aria-label="Zurück zur Liste"><Icon name="back" /></button>
     <h1>{isNewRoute && !reportId ? 'Neuer Bericht' : 'Servicebericht'}</h1>
     {#if savedPulseVisible}
-      <span class="saved">✓ Gespeichert</span>
+      <span class="saved"><Icon name="check" size={14} />Gespeichert</span>
     {/if}
     {#if reportId}
       <button
@@ -419,9 +420,11 @@
         disabled={exporting}
         aria-label="Als Word-Dokument exportieren"
       >
-        {exporting ? '…' : '⬇️'}
+        {#if exporting}…{:else}<Icon name="download" />{/if}
       </button>
-      <button type="button" class="delete-report" onclick={removeReport} aria-label="Bericht löschen">🗑</button>
+      <button type="button" class="delete-report" onclick={removeReport} aria-label="Bericht löschen">
+        <Icon name="trash" />
+      </button>
     {/if}
   </header>
   {#if exportError}
@@ -438,15 +441,16 @@
   {:else}
     <div class="content">
       {#if locked}
-        <div class="locked-banner">
+        <div class="locked-banner" class:signed={!!signedAt} class:finalized={!signedAt}>
           <p>
+            <Icon name="lock" size={15} />
             {#if signedAt}
-              🔒 Unterschrieben am {new Date(signedAt).toLocaleString('de-DE')}{signedByName ? ` von ${signedByName}` : ''} – der Bericht ist gesperrt.
+              Unterschrieben am {new Date(signedAt).toLocaleString('de-DE')}{signedByName ? ` von ${signedByName}` : ''} – der Bericht ist gesperrt.
             {:else}
-              🔒 Final abgeschlossen am {finalizedAt ? new Date(finalizedAt).toLocaleString('de-DE') : ''} (ohne Unterschrift) – der Bericht ist gesperrt.
+              Final abgeschlossen am {finalizedAt ? new Date(finalizedAt).toLocaleString('de-DE') : ''} (ohne Unterschrift) – der Bericht ist gesperrt.
             {/if}
           </p>
-          <button type="button" class="unlock" onclick={unlockManually}>🔓 Sperre aufheben</button>
+          <button type="button" class="unlock" onclick={unlockManually}><Icon name="unlock" size={15} />Sperre aufheben</button>
         </div>
       {/if}
       {#if reportId}
@@ -463,7 +467,7 @@
               <span class="visit-badge">{projectVisitInfo.index}. von {projectVisitInfo.total} Berichten</span>
             {/if}
           </span>
-          <span class="chevron" class:open={fieldsExpanded}>▾</span>
+          <span class="chevron" class:open={fieldsExpanded}><Icon name="chevron-down" size={16} /></span>
         </button>
       {/if}
       {#if !reportId || fieldsExpanded}
@@ -537,23 +541,24 @@
             type="button"
             class="status-toggle"
             class:completed={status === 'completed' && !locked}
-            class:signed={locked}
+            class:signed={locked && !!signedAt}
+            class:finalized={locked && !signedAt}
             onclick={toggleStatus}
             disabled={locked}
           >
             {#if locked && signedAt}
-              🔒 Unterschrieben
+              <Icon name="lock" size={14} />Unterschrieben
             {:else if locked}
-              🔒 Final abgeschlossen
+              <Icon name="lock" size={14} />Final abgeschlossen
             {:else if status === 'open'}
-              ● Offen
+              <Icon name="circle" size={14} />Offen
             {:else}
-              ✓ Abgeschlossen
+              <Icon name="check" size={14} />Abgeschlossen
             {/if}
           </button>
           {#if !locked}
             <button type="button" class="finalize-btn" onclick={finalizeWithoutSignature}>
-              🔒 Ohne Unterschrift final abschließen
+              <Icon name="lock" size={14} />Ohne Unterschrift final abschließen
             </button>
           {/if}
         </div>
@@ -669,6 +674,9 @@
   }
 
   .saved {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: 0.8rem;
     color: var(--color-success);
     font-weight: 600;
@@ -709,8 +717,6 @@
   .locked-banner {
     margin: var(--space-4) var(--space-4) 0;
     padding: var(--space-3) var(--space-4);
-    background: var(--color-signed-bg);
-    color: var(--color-signed);
     border-radius: var(--radius-md);
     font-size: 0.85rem;
     display: flex;
@@ -719,10 +725,25 @@
     align-items: flex-start;
   }
 
+  /* Unterschrieben vs. manuell final abgeschlossen bekommen bewusst
+     unterschiedliche Farben - siehe StatusBadge.svelte. */
+  .locked-banner.signed {
+    background: var(--color-signed-bg);
+    color: var(--color-signed);
+  }
+
+  .locked-banner.finalized {
+    background: var(--color-finalized-bg);
+    color: var(--color-finalized);
+  }
+
   .locked-banner p {
     margin: 0;
     font-weight: 600;
     line-height: 1.4;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
   }
 
   .locked-banner .unlock {
@@ -823,6 +844,9 @@
   }
 
   .status-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     align-self: flex-start;
     background: var(--color-open-bg);
     color: var(--color-open);
@@ -834,6 +858,9 @@
   }
 
   .finalize-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     background: transparent;
     border: 1px dashed var(--color-border);
     color: var(--color-text-muted);
@@ -852,6 +879,11 @@
   .status-toggle.signed {
     background: var(--color-signed-bg);
     color: var(--color-signed);
+  }
+
+  .status-toggle.finalized {
+    background: var(--color-finalized-bg);
+    color: var(--color-finalized);
   }
 
   .tabs {

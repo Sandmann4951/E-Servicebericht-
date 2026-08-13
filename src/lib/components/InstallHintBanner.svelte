@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Icon from './Icon.svelte';
+
   // iOS Safari unterstützt kein `beforeinstallprompt`-Event - daher ein
   // manueller Hinweis, wie man die App per "Zum Home-Bildschirm hinzufügen"
   // installiert. Wird einmalig dauerhaft ausgeblendet, wenn der Nutzer es
@@ -32,10 +34,10 @@
   <div class="install-hint" role="status">
     <p>
       Tipp: Für den App-Modus auf <strong>Teilen</strong>
-      <span aria-hidden="true">⬆️</span> tippen und dann
+      <Icon name="upload" size={14} /> tippen und dann
       <strong>„Zum Home-Bildschirm“</strong> wählen.
     </p>
-    <button type="button" class="close" onclick={dismiss} aria-label="Hinweis schließen">✕</button>
+    <button type="button" class="close" onclick={dismiss} aria-label="Hinweis schließen"><Icon name="close" size={16} /></button>
   </div>
 {/if}
 

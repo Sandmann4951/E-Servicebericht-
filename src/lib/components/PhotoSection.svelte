@@ -2,6 +2,7 @@
   import { addPhoto, deletePhoto, listPhotos } from '../db/photos';
   import type { Photo } from '../db/types';
   import { createThumbnail } from '../utils/image';
+  import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
@@ -114,8 +115,12 @@
     <p class="hint">Bericht ist gesperrt – Fotos können nicht mehr geändert werden.</p>
   {:else}
     <div class="upload-buttons">
-      <button type="button" onclick={() => cameraInput?.click()} disabled={uploading}>📷 Kamera</button>
-      <button type="button" onclick={() => libraryInput?.click()} disabled={uploading}>🖼️ Bibliothek</button>
+      <button type="button" onclick={() => cameraInput?.click()} disabled={uploading}>
+        <Icon name="camera" />Kamera
+      </button>
+      <button type="button" onclick={() => libraryInput?.click()} disabled={uploading}>
+        <Icon name="image" />Bibliothek
+      </button>
     </div>
   {/if}
 
@@ -165,7 +170,7 @@
     <img src={viewerUrl} alt="Einsatzfoto in Vollansicht" />
     <div class="viewer-actions">
       {#if !locked}
-        <button type="button" class="delete" onclick={removeCurrent}>🗑 Löschen</button>
+        <button type="button" class="delete" onclick={removeCurrent}><Icon name="trash" />Löschen</button>
       {/if}
       <button type="button" class="close" onclick={closeViewer}>Schließen</button>
     </div>
@@ -186,6 +191,10 @@
 
   .upload-buttons button {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -254,6 +263,9 @@
   }
 
   .viewer-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: var(--space-2) var(--space-5);
     border-radius: var(--radius-sm);
     border: none;

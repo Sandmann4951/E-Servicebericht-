@@ -3,6 +3,7 @@
   import type { TimeEntry } from '../db/types';
   import { switchToIdle, switchToProject } from '../clockActions';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
+  import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
@@ -81,12 +82,12 @@
         </span>
       </div>
       {#if !locked}
-        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}>⏹ Auschecken</button>
+        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
       {/if}
     {:else if locked}
       <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>
     {:else}
-      <button type="button" class="clock-in" onclick={clockIn} disabled={busy}>▶️ Einchecken</button>
+      <button type="button" class="clock-in" onclick={clockIn} disabled={busy}><Icon name="play" />Einchecken</button>
     {/if}
   </div>
 {/if}
@@ -100,6 +101,10 @@
 
   .clock-in,
   .clock-out {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
     border: none;
     border-radius: var(--radius-md);
     padding: var(--space-4);

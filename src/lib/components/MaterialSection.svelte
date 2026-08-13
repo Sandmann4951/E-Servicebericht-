@@ -2,6 +2,7 @@
   import { addMaterialItem, deleteMaterialItem, listMaterialItems, updateMaterialItem } from '../db/materialItems';
   import type { MaterialItem } from '../db/types';
   import { STANDARD_MATERIALS } from '../materialCatalog';
+  import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
@@ -121,7 +122,9 @@
                   {item.quantity} {item.unit}{item.articleNumber ? ` · Art.-Nr. ${item.articleNumber}` : ''}
                 </span>
               </button>
-              <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>🗑</button>
+              <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>
+                <Icon name="trash" />
+              </button>
             {/if}
           </li>
         {/each}

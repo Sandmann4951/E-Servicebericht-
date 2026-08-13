@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ServiceReport } from '../db/types';
   import StatusBadge from './StatusBadge.svelte';
+  import Icon from './Icon.svelte';
   import { formatDateTimeDE, formatDurationMinutes } from '../utils/date';
   import { navigate } from '../router.svelte';
 
@@ -23,6 +24,9 @@
         <span class="checked-in-badge"><span class="dot"></span>Eingecheckt</span>
       {/if}
       <StatusBadge status={report.status} signed={!!report.signedAt} locked={!!report.finalizedAt} />
+      {#if report.finalizedAt && !report.exportedAt}
+        <span class="unexported-badge">Nicht exportiert</span>
+      {/if}
     </div>
   </div>
 
@@ -39,7 +43,7 @@
 
   <div class="updated">Zuletzt geändert: {formatDateTimeDE(report.updatedAt)}</div>
   {#if report.exportedAt}
-    <div class="exported">📤 Exportiert am {formatDateTimeDE(report.exportedAt)}</div>
+    <div class="exported"><Icon name="upload" size={12} />Exportiert am {formatDateTimeDE(report.exportedAt)}</div>
   {/if}
 </button>
 
@@ -131,7 +135,22 @@
 
   .exported {
     margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-size: 0.75rem;
     color: var(--color-text-muted);
+  }
+
+  .unexported-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--color-unexported-bg);
+    color: var(--color-unexported);
   }
 </style>

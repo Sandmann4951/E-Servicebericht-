@@ -10,6 +10,7 @@
   import { getReport } from '../db/reports';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
+  import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
@@ -160,7 +161,9 @@
                 </span>
                 {#if entry.note}<span class="note">{entry.note}</span>{/if}
               </button>
-              <button type="button" class="delete" aria-label="Zeiteintrag löschen" onclick={() => remove(entry)}>🗑</button>
+              <button type="button" class="delete" aria-label="Zeiteintrag löschen" onclick={() => remove(entry)}>
+                <Icon name="trash" />
+              </button>
             {/if}
           </li>
         {/each}

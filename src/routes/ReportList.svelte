@@ -3,6 +3,7 @@
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
+  import Icon from '../lib/components/Icon.svelte';
   import { navigate } from '../lib/router.svelte';
 
   let reports = $state<ServiceReport[]>([]);
@@ -169,22 +170,22 @@
         aria-haspopup="true"
         aria-expanded={menuOpen}
       >
-        ☰
+        <Icon name="menu" size={22} />
       </button>
       {#if menuOpen}
         <button type="button" class="menu-backdrop" onclick={closeMenu} aria-label="Menü schließen"></button>
         <div class="menu-popup" role="menu">
           <button type="button" role="menuitem" onclick={() => menuNavigate('/statistik')}>
-            <span class="menu-icon">📊</span><span>Statistik</span>
+            <span class="menu-icon"><Icon name="stats" /></span><span>Statistik</span>
           </button>
           <button type="button" role="menuitem" onclick={() => menuNavigate('/leerlaufzeiten')}>
-            <span class="menu-icon">⏱️</span><span>Leerlaufzeiten zuordnen</span>
+            <span class="menu-icon"><Icon name="clock" /></span><span>Leerlaufzeiten zuordnen</span>
           </button>
           <button type="button" role="menuitem" onclick={menuExportBackup} disabled={backupBusy}>
-            <span class="menu-icon">💾</span><span>Sicherung exportieren</span>
+            <span class="menu-icon"><Icon name="download" /></span><span>Sicherung exportieren</span>
           </button>
           <button type="button" role="menuitem" onclick={menuTriggerImport} disabled={backupBusy}>
-            <span class="menu-icon">📥</span><span>Sicherung wiederherstellen</span>
+            <span class="menu-icon"><Icon name="upload" /></span><span>Sicherung wiederherstellen</span>
           </button>
         </div>
       {/if}
@@ -332,9 +333,10 @@
   }
 
   .menu-icon {
-    font-size: 1.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 1.4em;
-    text-align: center;
     flex-shrink: 0;
   }
 
