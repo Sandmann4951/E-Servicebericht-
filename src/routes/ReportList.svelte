@@ -4,6 +4,7 @@
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import Icon from '../lib/components/Icon.svelte';
+  import BulkExportDialog from '../lib/components/BulkExportDialog.svelte';
   import { navigate } from '../lib/router.svelte';
   import logoUrl from '../assets/logo.svg';
   import { themeState, toggleTheme } from '../lib/theme.svelte';
@@ -16,6 +17,7 @@
   let backupError = $state('');
   let fileInput: HTMLInputElement | undefined;
   let menuOpen = $state(false);
+  let bulkExportOpen = $state(false);
   /** Der Bericht, in den aktuell eingecheckt ist (falls einer) - wird oben angepinnt und farblich hervorgehoben. */
   let activeReportId = $state<string | undefined>(undefined);
 
@@ -90,6 +92,11 @@
   function menuToggleTheme(): void {
     closeMenu();
     toggleTheme();
+  }
+
+  function menuOpenBulkExport(): void {
+    closeMenu();
+    bulkExportOpen = true;
   }
 
   // Schließt das Menü bei Escape - Maus-/Tastatur-Bedienung (z.B. iPad mit
@@ -197,6 +204,9 @@
           <button type="button" role="menuitem" onclick={menuTriggerImport} disabled={backupBusy}>
             <span class="menu-icon"><Icon name="upload" /></span><span>Sicherung wiederherstellen</span>
           </button>
+          <button type="button" role="menuitem" onclick={menuOpenBulkExport}>
+            <span class="menu-icon"><Icon name="copy" /></span><span>Serviceberichte sammelexportieren</span>
+          </button>
           <button type="button" role="menuitem" onclick={menuToggleTheme}>
             <span class="menu-icon">
               <Icon name={themeState.mode === 'dark' ? 'sun' : 'moon'} />
@@ -264,6 +274,10 @@
   </div>
 
   <button type="button" class="fab" onclick={newReport} aria-label="Neuer Bericht">+</button>
+
+  {#if bulkExportOpen}
+    <BulkExportDialog onClose={() => (bulkExportOpen = false)} onExported={loadReports} />
+  {/if}
 </div>
 
 <style>

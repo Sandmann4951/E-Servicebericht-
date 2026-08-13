@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { computeDurationMinutes, formatDateDE, formatDurationMinutes, nowHHmm, todayISODate } from '../../lib/utils/date';
+import {
+  computeDurationMinutes,
+  formatDateDE,
+  formatDurationMinutes,
+  nowHHmm,
+  startOfWeekISO,
+  todayISODate
+} from '../../lib/utils/date';
 
 describe('computeDurationMinutes', () => {
   it('berechnet die Differenz in Minuten', () => {
@@ -50,5 +57,26 @@ describe('todayISODate', () => {
 describe('nowHHmm', () => {
   it('liefert die aktuelle Uhrzeit im Format "HH:mm"', () => {
     expect(nowHHmm()).toMatch(/^\d{2}:\d{2}$/);
+  });
+});
+
+describe('startOfWeekISO', () => {
+  it('liefert für einen Mittwoch den Montag derselben Woche', () => {
+    // 2026-08-12 ist ein Mittwoch.
+    expect(startOfWeekISO('2026-08-12')).toBe('2026-08-10');
+  });
+
+  it('liefert für einen Montag denselben Tag', () => {
+    expect(startOfWeekISO('2026-08-10')).toBe('2026-08-10');
+  });
+
+  it('liefert für einen Sonntag den Montag DAVOR (nicht denselben Tag)', () => {
+    // 2026-08-16 ist ein Sonntag - gehört noch zur Woche, die am 2026-08-10 (Montag) begann.
+    expect(startOfWeekISO('2026-08-16')).toBe('2026-08-10');
+  });
+
+  it('rechnet über einen Monatswechsel hinweg korrekt', () => {
+    // 2026-09-01 ist ein Dienstag, die Woche begann am 2026-08-31 (Montag).
+    expect(startOfWeekISO('2026-09-01')).toBe('2026-08-31');
   });
 });

@@ -58,6 +58,24 @@ export function formatDurationMinutes(totalMinutes: number | undefined | null): 
   return `${hours}:${String(minutes).padStart(2, '0')} Std.`;
 }
 
+/**
+ * Montag der Kalenderwoche, die `isoDate` enthält, als "YYYY-MM-DD"
+ * (deutsche/ISO-8601-Konvention: Woche beginnt Montag, nicht Sonntag).
+ * Rechnet bewusst über den lokalen `Date`-Konstruktor mit Jahr/Monat/Tag
+ * statt über String-Parsing von `new Date(iso)` (das interpretiert als UTC
+ * und würde nahe Mitternacht in manchen Zeitzonen einen falschen Tag
+ * liefern) - gleiches Muster wie `shiftDate()` in Statistik.svelte.
+ */
+export function startOfWeekISO(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  // getDay(): 0=So, 1=Mo, ..., 6=Sa - auf Montag als Wochenstart umrechnen.
+  const dayOfWeek = date.getDay();
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  date.setDate(date.getDate() + diffToMonday);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 /** Formatiert "YYYY-MM-DD" als deutsches Datum "TT.MM.JJJJ". */
 export function formatDateDE(isoDate: string): string {
   const [year, month, day] = isoDate.split('-');
