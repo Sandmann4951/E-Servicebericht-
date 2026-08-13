@@ -71,11 +71,15 @@
     align-items: center;
     gap: var(--space-3);
     max-width: 100%;
-    background: var(--color-text);
-    color: #fff;
+    /* Bewusst FESTE (nicht Theme-abhängige) Farben: dieser Toast soll sich
+       in beiden Themes gleich als "dunkler Hinweis-Chip" absetzen. Mit
+       var(--color-text) wäre er im Dunkel-Theme fast weiß geworden - dann
+       unsichtbarer weißer Text auf fast-weißem Grund. */
+    background: var(--color-inverse-surface);
+    color: var(--color-inverse-text);
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 
   .toast span {
@@ -85,7 +89,7 @@
 
   .primary {
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-primary-contrast);
     border: none;
     border-radius: var(--radius-sm);
     padding: var(--space-2) var(--space-3);

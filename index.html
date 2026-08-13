@@ -3,6 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <!--
+      Setzt data-theme SOFORT synchron, bevor irgendetwas gerendert wird -
+      verhindert einen kurzen Hell-Flash bei Systemeinstellung "Dunkel"
+      (das eigentliche Modul-Script src/main.ts/lib/theme.svelte.ts lädt
+      erst später und würde sonst zu spät kommen). Dieselbe Logik wie
+      theme.svelte.ts resolveInitialTheme(), bewusst hier dupliziert, weil
+      sie synchron vor jedem Modul-Code laufen muss.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('e-servicebericht:theme');
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          // localStorage evtl. nicht verfügbar - dann bleibt es beim
+          // Hell-Standard, kein harter Fehler.
+        }
+      })();
+    </script>
     <title>Rivo</title>
     <meta name="description" content="Rivo – digitale Serviceberichte für Elektrohandwerk-Serviceeinsätze" />
     <meta name="theme-color" content="#2563eb" />

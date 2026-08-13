@@ -193,7 +193,11 @@
   .pad {
     width: 100%;
     height: 220px;
-    background: var(--color-surface);
+    /* Bewusst FEST hell statt --color-surface: die Unterschrift wird als
+       dunkle Tinte gezeichnet (setupCanvas() strokeStyle) - wie auf Papier
+       unterschreiben soll das auch im Dunkel-Theme lesbar/gewohnt bleiben,
+       statt dunkle Tinte auf dunklem Grund unsichtbar zu machen. */
+    background: #ffffff;
     border: 1px dashed var(--color-border);
     border-radius: var(--radius-md);
     touch-action: none;
@@ -253,7 +257,9 @@
     width: 100%;
     max-height: 220px;
     object-fit: contain;
-    background: var(--color-surface);
+    /* Fest hell, aus demselben Grund wie .pad oben - die PNG-Unterschrift
+       hat transparenten Hintergrund, nur die dunkle Tinte ist gezeichnet. */
+    background: #ffffff;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
   }

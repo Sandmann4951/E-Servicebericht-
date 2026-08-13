@@ -6,6 +6,7 @@
   import Icon from '../lib/components/Icon.svelte';
   import { navigate } from '../lib/router.svelte';
   import logoUrl from '../assets/logo.svg';
+  import { themeState, toggleTheme } from '../lib/theme.svelte';
 
   let reports = $state<ServiceReport[]>([]);
   let filter = $state<ReportFilter>('all');
@@ -84,6 +85,11 @@
   function menuTriggerImport(): void {
     closeMenu();
     triggerImport();
+  }
+
+  function menuToggleTheme(): void {
+    closeMenu();
+    toggleTheme();
   }
 
   // Schließt das Menü bei Escape - Maus-/Tastatur-Bedienung (z.B. iPad mit
@@ -190,6 +196,12 @@
           </button>
           <button type="button" role="menuitem" onclick={menuTriggerImport} disabled={backupBusy}>
             <span class="menu-icon"><Icon name="upload" /></span><span>Sicherung wiederherstellen</span>
+          </button>
+          <button type="button" role="menuitem" onclick={menuToggleTheme}>
+            <span class="menu-icon">
+              <Icon name={themeState.mode === 'dark' ? 'sun' : 'moon'} />
+            </span>
+            <span>{themeState.mode === 'dark' ? 'Helles Design' : 'Dunkles Design'}</span>
           </button>
         </div>
       {/if}
@@ -326,7 +338,7 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    box-shadow: 0 12px 28px rgba(20, 25, 40, 0.18);
+    box-shadow: 0 12px 28px var(--color-shadow);
     overflow: hidden;
   }
 
@@ -446,7 +458,7 @@
     border: none;
     font-size: 1.8rem;
     line-height: 1;
-    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+    box-shadow: 0 8px 20px var(--color-primary-glow);
     display: flex;
     align-items: center;
     justify-content: center;
