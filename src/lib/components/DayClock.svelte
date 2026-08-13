@@ -96,8 +96,12 @@
     load();
   });
 
+  // Bewusst an `workDay` statt `activeEntry` gekoppelt: solange der Tag
+  // läuft, soll die "Heute bisher"-Kachel immer weiterlaufen - auch falls
+  // (durch einen Bug an anderer Stelle) kurzzeitig kein offener Zeiteintrag
+  // vorhanden sein sollte, statt dann einzufrieren.
   $effect(() => {
-    if (!activeEntry) return;
+    if (!workDay) return;
     const interval = setInterval(() => {
       tick += 1;
       loadTodaySummary();

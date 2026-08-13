@@ -10,11 +10,12 @@
     unlockReport,
     updateReport
   } from '../lib/db/reports';
-  import { getActiveTimeEntry, updateTimeEntry } from '../lib/db/timeEntries';
+  import { getActiveTimeEntry } from '../lib/db/timeEntries';
+  import { switchToIdle } from '../lib/clockActions';
   import type { ReportStatus } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
-  import { formatDurationMinutes, nowHHmm } from '../lib/utils/date';
+  import { formatDurationMinutes } from '../lib/utils/date';
   import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
@@ -247,12 +248,21 @@
    * Beendet eine ggf. noch laufende Stempeluhr dieses Berichts - wird sowohl
    * beim Unterschreiben als auch beim manuellen Abschließen ohne Unterschrift
    * aufgerufen, damit beim Sperren kein offener Zeiteintrag zurückbleibt.
+   *
+   * Nutzt bewusst switchToIdle() (wie das normale "Auschecken" in TimeClock)
+   * statt den Eintrag nur direkt zu schließen: sonst bleibt der Tagesstempel
+   * zwar aktiv, aber ohne offenen Abschnitt zurück - ein Zustand, den der Rest
+   * der App nie erwartet (siehe checkInDay()). Konkret bewirkte das einen Bug:
+   * die "Heute bisher"-Kachel in der Berichtsliste fror danach ein, weil ihr
+   * Live-Update-Intervall an einen offenen Eintrag gekoppelt ist. switchToIdle()
+   * eröffnet stattdessen sofort einen neuen Leerlaufzeit-Abschnitt, genau wie
+   * beim manuellen Auschecken aus einem Projekt.
    */
   async function autoStopActiveClock(): Promise<void> {
     if (!reportId) return;
     const activeEntry = await getActiveTimeEntry(reportId);
     if (!activeEntry) return;
-    await updateTimeEntry(activeEntry.id, { endTime: nowHHmm() });
+    await switchToIdle();
     await refreshSummary();
   }
 
