@@ -1,14 +1,14 @@
 <script lang="ts">
   import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
-  import { listAbsencesInRange } from '../lib/db/absences';
-  import type { Absence } from '../lib/db/types';
+  import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
+  import type { Absence, AbsenceType } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
   import { computeDayStatus, type DayStatus } from '../lib/utils/calendarDay';
   import { getGermanHolidays } from '../lib/utils/holidays';
   import { getBundesland } from '../lib/settings';
-  import Icon from '../lib/components/Icon.svelte';
+  import Icon, { type IconName } from '../lib/components/Icon.svelte';
 
   type View = 'tag' | 'monat' | 'jahr' | 'kalender';
   type CalendarMode = 'monat' | 'woche';
@@ -54,6 +54,22 @@
     open: 'Offen'
   };
 
+  // Für das Quick-Entry-Panel unter dem Kalendertag: dieselbe Auswahl wie im
+  // Abwesenheiten-Screen (Urlaub/Krank/Zeitausgleich), hier aber direkt im
+  // Kalender antippbar statt über einen eigenen Screen.
+  const ABSENCE_TYPES: AbsenceType[] = ['vacation', 'sick', 'timeoff'];
+  const ABSENCE_ICONS: Record<AbsenceType, IconName> = {
+    vacation: 'umbrella',
+    sick: 'thermometer',
+    timeoff: 'refresh-cw'
+  };
+  // Nur für diese Status ergibt eine Abwesenheits-Schnellerfassung Sinn: ein
+  // offener Werktag (kann als Urlaub/Krank/ZA markiert werden) oder ein Tag,
+  // der bereits eine Abwesenheit trägt (kann geändert/entfernt werden). Bei
+  // Feiertag/Wochenende/bereits gebuchter Zeit gibt's bewusst keine
+  // Schnellerfassung - dort würde eine Abwesenheit echte Daten überlagern.
+  const QUICK_ABSENCE_STATUSES: DayStatus[] = ['open', 'vacation', 'sick', 'timeoff'];
+
   let dayStats = $state<DayStats[]>([]);
   let loading = $state(true);
   let view = $state<View>('monat');
@@ -61,6 +77,12 @@
   let monthTarget = $state<MonthTarget>({ targetMinutes: 0, workingDays: 0 });
   let calendarMode = $state<CalendarMode>('monat');
   let calendarAbsences = $state<Absence[]>([]);
+  // Im Kalender-Tab angetippter Tag: statt (wie früher) sofort in den
+  // Tag-Reiter zu springen, bleibt man im Kalender und die Tages-Infos
+  // klappen direkt darunter auf. Erneutes Antippen desselben Tages klappt
+  // wieder zu.
+  let selectedCalendarDate = $state<string | undefined>(undefined);
+  let calendarDayBreakdown = $state<DayProjectBreakdown[]>([]);
 
   const today = todayISODate();
   let selectedDate = $state(today);
@@ -98,16 +120,43 @@
     });
   });
 
+  function calendarRange(): { start: string; end: string } {
+    return calendarMode === 'monat'
+      ? { start: `${selectedMonth}-01`, end: `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, '0')}` }
+      : { start: selectedWeekStart, end: shiftDate(selectedWeekStart, 6) };
+  }
+
+  async function reloadCalendarAbsences(): Promise<void> {
+    const range = calendarRange();
+    calendarAbsences = await listAbsencesInRange(range.start, range.end);
+  }
+
   // Abwesenheiten für den sichtbaren Kalender-Zeitraum (Monat oder Woche)
   // nachladen - dieselbe view-Gate-Logik wie oben.
   $effect(() => {
     if (view !== 'kalender') return;
-    const range =
-      calendarMode === 'monat'
-        ? { start: `${selectedMonth}-01`, end: `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, '0')}` }
-        : { start: selectedWeekStart, end: shiftDate(selectedWeekStart, 6) };
-    listAbsencesInRange(range.start, range.end).then((result) => {
-      calendarAbsences = result;
+    void reloadCalendarAbsences();
+  });
+
+  // Wechselt sich der sichtbare Zeitraum (Monat-/Wochennavigation, Monat-
+  // /Woche-Umschalter), schließt das Tages-Panel - sonst würde es einen Tag
+  // zeigen, der gar nicht mehr im sichtbaren Raster ist.
+  $effect(() => {
+    calendarMode;
+    selectedMonth;
+    selectedWeekStart;
+    selectedCalendarDate = undefined;
+  });
+
+  // Lädt die Projekt-Aufschlüsselung für den im Kalender aufgeklappten Tag -
+  // dasselbe Muster wie oben für die Tag-Ansicht.
+  $effect(() => {
+    if (view !== 'kalender' || !selectedCalendarDate) {
+      calendarDayBreakdown = [];
+      return;
+    }
+    getDayProjectBreakdown(selectedCalendarDate).then((result) => {
+      calendarDayBreakdown = result;
     });
   });
 
@@ -282,6 +331,18 @@
     return cells;
   });
 
+  const selectedCalendarDayStat = $derived.by(() =>
+    selectedCalendarDate
+      ? (dayStats.find((d) => d.date === selectedCalendarDate) ?? emptyStats(selectedCalendarDate))
+      : emptyStats('')
+  );
+
+  const selectedCalendarCell = $derived.by((): CalendarCell | undefined => {
+    if (!selectedCalendarDate) return undefined;
+    const cells = calendarMode === 'monat' ? calendarMonthCells : calendarWeekCells;
+    return cells.find((cell) => cell?.date === selectedCalendarDate) ?? undefined;
+  });
+
   function openDay(date: string): void {
     selectedDate = date;
     view = 'tag';
@@ -290,6 +351,29 @@
   function openMonth(ym: string): void {
     selectedMonth = ym;
     view = 'monat';
+  }
+
+  /** Klappt die Tages-Infos im Kalender-Tab auf/zu (erneutes Antippen desselben Tages klappt wieder zu). */
+  function selectCalendarDay(date: string): void {
+    selectedCalendarDate = selectedCalendarDate === date ? undefined : date;
+  }
+
+  /**
+   * Setzt/wechselt/entfernt die Abwesenheit für einen Tag direkt aus dem
+   * Kalender heraus. Bewusst ohne die "schon Zeiten erfasst?"-Rückfrage aus
+   * Abwesenheiten.svelte: die Schnellerfassung ist nur für Tage mit Status
+   * 'open' oder bereits vorhandener Abwesenheit sichtbar (s. QUICK_ABSENCE_
+   * STATUSES) - beides schließt bereits gebuchte Zeit aus (siehe
+   * computeDayStatus()-Priorität), die Rückfrage kann also nie greifen.
+   */
+  async function quickToggleAbsence(date: string, type: AbsenceType): Promise<void> {
+    const existing = calendarAbsences.find((a) => a.date === date);
+    if (existing?.type === type) {
+      await removeAbsence(date);
+    } else {
+      await setAbsence(date, type);
+    }
+    await reloadCalendarAbsences();
   }
 </script>
 
@@ -456,9 +540,10 @@
                 type="button"
                 class="calendar-cell"
                 class:today={cell.date === today}
+                class:selected={cell.date === selectedCalendarDate}
                 style:background={STATUS_BG[cell.status]}
                 style:color={STATUS_FG[cell.status]}
-                onclick={() => openDay(cell.date)}
+                onclick={() => selectCalendarDay(cell.date)}
                 aria-label="{formatDateLongDE(cell.date)}: {STATUS_LABELS[cell.status]}"
               >
                 {cell.dayOfMonth}
@@ -498,14 +583,78 @@
               type="button"
               class="calendar-cell"
               class:today={cell.date === today}
+              class:selected={cell.date === selectedCalendarDate}
               style:background={STATUS_BG[cell.status]}
               style:color={STATUS_FG[cell.status]}
-              onclick={() => openDay(cell.date)}
+              onclick={() => selectCalendarDay(cell.date)}
               aria-label="{formatDateLongDE(cell.date)}: {STATUS_LABELS[cell.status]}"
             >
               {cell.dayOfMonth}
             </button>
           {/each}
+        </div>
+      {/if}
+
+      {#if selectedCalendarDate}
+        {@const date = selectedCalendarDate}
+        {@const cell = selectedCalendarCell}
+        <div class="day-panel">
+          <div class="day-panel-header">
+            <p class="day-panel-title">{formatDateLongDE(date)}</p>
+            <button
+              type="button"
+              class="day-panel-close"
+              onclick={() => (selectedCalendarDate = undefined)}
+              aria-label="Tages-Infos schließen"
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          {#if selectedCalendarDayStat.totalMinutes > 0}
+            {@render statsCardSnippet(selectedCalendarDayStat)}
+            {#if calendarDayBreakdown.length > 0}
+              <ul class="breakdown">
+                {#each calendarDayBreakdown as project (project.reportId)}
+                  <li>
+                    <button type="button" class="breakdown-row" onclick={() => navigate(`/reports/${project.reportId}`)}>
+                      <span class="breakdown-label plain">
+                        {project.projectNumber}{#if project.customer} · {project.customer}{/if}
+                      </span>
+                      <span class="breakdown-values">
+                        <span class="productive">{formatDurationMinutes(project.minutes)}</span>
+                      </span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <button type="button" class="day-panel-link" onclick={() => openDay(date)}>Vollständige Tagesansicht öffnen</button>
+          {:else if cell?.status === 'holiday'}
+            <p class="hint small">Feiertag, keine Zeiten erfasst.</p>
+          {:else if cell?.status === 'weekend'}
+            <p class="hint small">Wochenende, keine Zeiten erfasst.</p>
+          {:else}
+            <p class="hint small">Keine Zeiten erfasst.</p>
+          {/if}
+
+          {#if cell && QUICK_ABSENCE_STATUSES.includes(cell.status)}
+            <div class="type-select" role="radiogroup" aria-label="Abwesenheit für diesen Tag">
+              {#each ABSENCE_TYPES as type (type)}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={cell.status === type}
+                  class:active={cell.status === type}
+                  onclick={() => quickToggleAbsence(date, type)}
+                >
+                  <Icon name={ABSENCE_ICONS[type]} />
+                  <span>{STATUS_LABELS[type]}</span>
+                </button>
+              {/each}
+            </div>
+            <p class="hint small">Antippen zum Eintragen, erneutes Antippen des aktiven Eintrags entfernt ihn wieder.</p>
+          {/if}
         </div>
       {/if}
 
@@ -845,6 +994,87 @@
 
   .calendar-cell.today {
     box-shadow: inset 0 0 0 2px var(--color-primary);
+  }
+
+  .calendar-cell.selected {
+    box-shadow: inset 0 0 0 2px var(--color-text);
+  }
+
+  .calendar-cell.today.selected {
+    box-shadow:
+      inset 0 0 0 2px var(--color-primary),
+      inset 0 0 0 4px var(--color-text);
+  }
+
+  .day-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+  }
+
+  .day-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .day-panel-title {
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .day-panel-close {
+    background: transparent;
+    border: none;
+    padding: var(--space-1);
+    min-height: auto;
+    color: var(--color-text-muted);
+  }
+
+  .day-panel-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: auto;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    text-align: left;
+  }
+
+  .hint.small {
+    margin: 0;
+    font-size: 0.82rem;
+  }
+
+  .type-select {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+  }
+
+  .type-select button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-2);
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+    min-height: auto;
+  }
+
+  .type-select button.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-contrast);
   }
 
   .legend {
