@@ -74,7 +74,12 @@
   let loading = $state(true);
   let view = $state<View>('monat');
   let projectBreakdown = $state<DayProjectBreakdown[]>([]);
-  let monthTarget = $state<MonthTarget>({ targetMinutes: 0, workingDays: 0 });
+  let monthTarget = $state<MonthTarget>({
+    targetMinutes: 0,
+    workingDays: 0,
+    creditedAbsenceDays: 0,
+    creditedAbsenceMinutes: 0
+  });
   let calendarMode = $state<CalendarMode>('monat');
   let calendarAbsences = $state<Absence[]>([]);
   // Im Kalender-Tab angetippter Tag: statt (wie früher) sofort in den
@@ -380,7 +385,7 @@
 <div class="screen">
   <header class="header">
     <button type="button" class="back" onclick={() => navigate('/')} aria-label="Zurück zur Übersicht"><Icon name="back" /></button>
-    <h1>Statistik</h1>
+    <h1>Auswertung</h1>
   </header>
 
   <div class="tabs" role="tablist" aria-label="Zeitraum wählen">
@@ -671,18 +676,27 @@
 </div>
 
 {#snippet targetCardSnippet(target: MonthTarget, actual: DayStats)}
+  {@const effectiveIstMinutes = actual.totalMinutes + target.creditedAbsenceMinutes}
   <div class="stats-card">
     <div class="stats">
       <div class="stat"><strong>{formatDurationMinutes(target.targetMinutes)}</strong><span>Soll</span></div>
-      <div class="stat"><strong>{formatDurationMinutes(actual.totalMinutes)}</strong><span>Ist</span></div>
+      <div class="stat"><strong>{formatDurationMinutes(effectiveIstMinutes)}</strong><span>Ist</span></div>
       <div
         class="stat"
-        class:diff-positive={actual.totalMinutes >= target.targetMinutes}
-        class:diff-negative={actual.totalMinutes < target.targetMinutes}
+        class:diff-positive={effectiveIstMinutes >= target.targetMinutes}
+        class:diff-negative={effectiveIstMinutes < target.targetMinutes}
       >
-        <strong>{formatDiffMinutes(actual.totalMinutes - target.targetMinutes)}</strong><span>Differenz</span>
+        <strong>{formatDiffMinutes(effectiveIstMinutes - target.targetMinutes)}</strong><span>Differenz</span>
       </div>
     </div>
+    {#if target.creditedAbsenceDays > 0}
+      <p class="credit-caption">
+        davon {target.creditedAbsenceDays}
+        {target.creditedAbsenceDays === 1 ? 'Urlaubs-/Kranktag' : 'Urlaubs-/Kranktage'} angerechnet ({formatDurationMinutes(
+          target.creditedAbsenceMinutes
+        )})
+      </p>
+    {/if}
   </div>
 {/snippet}
 
@@ -874,6 +888,13 @@
     text-align: center;
     font-size: 0.8rem;
     color: var(--color-text-muted);
+  }
+
+  .credit-caption {
+    margin: 0;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--color-vacation);
   }
 
   .projects {

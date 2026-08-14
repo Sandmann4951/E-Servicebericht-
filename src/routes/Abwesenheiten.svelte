@@ -27,13 +27,19 @@
   let selectedYear = $state(Number(today.slice(0, 4)));
 
   let formDate = $state(today);
+  // "Bis" - standardmäßig gleich "Von" (Einzeltag). Sobald es davon abweicht,
+  // legt save() für jeden Tag im Zeitraum einen eigenen Eintrag an (siehe
+  // enumerateDates()) - eine mehrtägige Abwesenheit bleibt also weiterhin
+  // N einzelne Datensätze, nur die Eingabe ist ein einziger Zeitraum.
+  let formEndDate = $state(today);
   let formType = $state<AbsenceType>('vacation');
   let formNote = $state('');
   // Ist ein Eintrag für formDate schon vorhanden, wird er beim Speichern
   // automatisch überschrieben (siehe setAbsence()/Upsert-Kommentar in
   // absences.ts) - editingDate merkt sich nur, ob es sich um eine
   // Bearbeitung eines bereits existierenden Tages handelt (fürs Löschen-Icon
-  // im Formular, rein kosmetisch).
+  // im Formular, rein kosmetisch). Nur für Einzeltag-Bearbeitung relevant -
+  // bei einem Zeitraum (formDate !== formEndDate) ist es immer undefined.
   let editingDate = $state<string | undefined>(undefined);
   let saving = $state(false);
 
@@ -56,6 +62,7 @@
 
   function resetForm(): void {
     formDate = today;
+    formEndDate = today;
     formType = 'vacation';
     formNote = '';
     editingDate = undefined;
@@ -64,28 +71,55 @@
   function startEdit(absence: Absence): void {
     editingDate = absence.date;
     formDate = absence.date;
+    formEndDate = absence.date;
     formType = absence.type;
     formNote = absence.note ?? '';
   }
 
+  /** Alle Tage von start bis end (inklusive), als "YYYY-MM-DD"-Strings. Leer, falls end vor start liegt. */
+  function enumerateDates(start: string, end: string): string[] {
+    const [sy, sm, sd] = start.split('-').map(Number);
+    const [ey, em, ed] = end.split('-').map(Number);
+    const startDate = new Date(sy, sm - 1, sd);
+    const endDate = new Date(ey, em - 1, ed);
+    const dates: string[] = [];
+    const cursor = new Date(startDate);
+    while (cursor.getTime() <= endDate.getTime()) {
+      dates.push(
+        `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
+      );
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+
+  const formDates = $derived.by(() => (formDate && formEndDate ? enumerateDates(formDate, formEndDate) : []));
+
   async function save(): Promise<void> {
-    if (!formDate || saving) return;
+    if (formDates.length === 0 || saving) return;
     saving = true;
     try {
-      // War für diesen Tag schon Arbeitszeit erfasst (Projekt- oder
-      // Leerlaufzeit über die Tagesstempeluhr), lieber einmal nachfragen -
-      // ein rückwirkend als Urlaub/Krank eingetragener Tag mit bereits
-      // erfassten Zeiten ist meist ein Versehen, soll aber nicht blockiert
-      // werden (z.B. nachträgliche Korrektur ist durchaus gewollt).
-      const existingEntries = await listTimeEntriesForDate(formDate);
-      if (existingEntries.length > 0) {
+      // War an einem der Tage im Zeitraum schon Arbeitszeit erfasst (Projekt-
+      // oder Leerlaufzeit über die Tagesstempeluhr), lieber einmal
+      // nachfragen - ein rückwirkend als Urlaub/Krank eingetragener Tag mit
+      // bereits erfassten Zeiten ist meist ein Versehen, soll aber nicht
+      // blockiert werden (z.B. nachträgliche Korrektur ist durchaus gewollt).
+      const daysWithTime: string[] = [];
+      for (const date of formDates) {
+        const entries = await listTimeEntriesForDate(date);
+        if (entries.length > 0) daysWithTime.push(date);
+      }
+      if (daysWithTime.length > 0) {
+        const label = daysWithTime.length <= 5 ? daysWithTime.map(formatDateDE).join(', ') : `${daysWithTime.length} Tagen`;
         const proceed = confirm(
-          `Für den ${formatDateDE(formDate)} sind bereits Zeiten erfasst.\n\nTrotzdem als „${TYPE_LABELS[formType]}" eintragen?`
+          `Für ${label} ${daysWithTime.length === 1 ? 'ist' : 'sind'} bereits Zeiten erfasst.\n\nTrotzdem als „${TYPE_LABELS[formType]}" eintragen?`
         );
         if (!proceed) return;
       }
 
-      await setAbsence(formDate, formType, formNote);
+      for (const date of formDates) {
+        await setAbsence(date, formType, formNote);
+      }
       resetForm();
       await load();
     } finally {
@@ -101,12 +135,16 @@
   }
 
   async function onFormDateChange(): Promise<void> {
-    // Beim manuellen Ändern des Datums (nicht per "Bearbeiten"-Tap) prüfen,
-    // ob für diesen Tag schon eine Abwesenheit existiert, und das Formular
-    // direkt damit befüllen - sonst würde ein Speichern hier den bestehenden
-    // Eintrag stillschweigend überschreiben (Upsert-Verhalten von
-    // setAbsence()), ohne dass sichtbar war, dass da schon etwas stand.
     if (!formDate) return;
+    if (formEndDate < formDate) formEndDate = formDate;
+    // Nur bei einem einzelnen Tag (Von = Bis) ergibt eine Auto-Befüllung
+    // Sinn - bei einem Zeitraum könnten mehrere unterschiedliche Einträge
+    // betroffen sein, da lässt sich kein einzelner sinnvoll vorausfüllen.
+    if (formEndDate !== formDate) return;
+    // Prüfen, ob für diesen Tag schon eine Abwesenheit existiert, und das
+    // Formular direkt damit befüllen - sonst würde ein Speichern hier den
+    // bestehenden Eintrag stillschweigend überschreiben (Upsert-Verhalten
+    // von setAbsence()), ohne dass sichtbar war, dass da schon etwas stand.
     const existing = await getAbsence(formDate);
     if (existing) {
       editingDate = existing.date;
@@ -115,6 +153,14 @@
     } else if (editingDate !== undefined) {
       editingDate = undefined;
       formNote = '';
+    }
+  }
+
+  function onFormEndDateChange(): void {
+    if (formEndDate < formDate) formEndDate = formDate;
+    // Sobald "Bis" vom "Von"-Datum abweicht, ist es kein Einzeltag-Edit mehr.
+    if (formEndDate !== formDate && editingDate !== undefined) {
+      editingDate = undefined;
     }
   }
 </script>
@@ -135,10 +181,16 @@
         void save();
       }}
     >
-      <label>
-        Datum
-        <input type="date" bind:value={formDate} onchange={onFormDateChange} required />
-      </label>
+      <div class="two-col">
+        <label>
+          Von
+          <input type="date" bind:value={formDate} onchange={onFormDateChange} required />
+        </label>
+        <label>
+          Bis
+          <input type="date" bind:value={formEndDate} min={formDate} onchange={onFormEndDateChange} required />
+        </label>
+      </div>
 
       <div class="type-select" role="radiogroup" aria-label="Art der Abwesenheit">
         {#each TYPES as type (type)}
@@ -164,8 +216,8 @@
         {#if editingDate}
           <button type="button" class="ghost" onclick={resetForm}>Abbrechen</button>
         {/if}
-        <button type="submit" class="primary" disabled={saving}>
-          {editingDate ? 'Aktualisieren' : 'Eintragen'}
+        <button type="submit" class="primary" disabled={saving || formDates.length === 0}>
+          {editingDate ? 'Aktualisieren' : formDates.length > 1 ? `${formDates.length} Tage eintragen` : 'Eintragen'}
         </button>
       </div>
     </form>
@@ -266,6 +318,12 @@
     gap: var(--space-1);
     font-size: 0.85rem;
     color: var(--color-text-muted);
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
   }
 
   .type-select {

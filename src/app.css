@@ -226,6 +226,14 @@ select {
   padding: var(--space-3);
   min-height: 44px;
   width: 100%;
+  /* Praktisch überall stehen diese Felder in einem `display: flex;
+     flex-direction: column;` Label (siehe .form label-Muster in mehreren
+     Screens) - dort ist der implizite `min-width: auto` eines Flex-Items
+     auf dessen Content-Breite gedeckelt. Bei input[type=date] auf iOS
+     Safari kann die native Kalender-Bedienung eine größere Content-Breite
+     als die verfügbare Fläche haben, wodurch das Feld trotz `width: 100%`
+     über den Container hinausragt. `min-width: 0` hebt diesen Boden auf. */
+  min-width: 0;
 }
 
 input:focus,

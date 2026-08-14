@@ -43,29 +43,47 @@ describe('getMonthTarget', () => {
     expect(result.targetMinutes).toBe(22 * 6 * 60); // 6 Std./Tag bei 30 Std./Woche
   });
 
-  it('zieht Urlaub von den Werktagen ab', async () => {
-    // 01.12.2026 ist ein Dienstag (Werktag) - als Urlaub eingetragen zählt er nicht mehr zum Soll.
+  it('Soll bleibt fix bei Urlaub - Urlaubstage senken das Soll NICHT, sondern werden als Ist angerechnet', async () => {
+    // 01.12.2026 ist ein Dienstag (Werktag).
     await setAbsence('2026-12-01', 'vacation');
 
     const result = await getMonthTarget('2026-12');
 
-    expect(result.workingDays).toBe(21);
+    expect(result.workingDays).toBe(22);
+    expect(result.targetMinutes).toBe(22 * 8 * 60);
+    expect(result.creditedAbsenceDays).toBe(1);
+    expect(result.creditedAbsenceMinutes).toBe(8 * 60);
   });
 
-  it('zieht auch Krank von den Werktagen ab', async () => {
+  it('rechnet auch Krank als Ist-Zeit an', async () => {
     await setAbsence('2026-12-01', 'sick');
+    await setAbsence('2026-12-02', 'sick');
 
     const result = await getMonthTarget('2026-12');
 
-    expect(result.workingDays).toBe(21);
+    expect(result.creditedAbsenceDays).toBe(2);
+    expect(result.creditedAbsenceMinutes).toBe(2 * 8 * 60);
   });
 
-  it('zieht Zeitausgleich NICHT von den Werktagen ab (baut Überstunden über eine niedrigere Ist-Zeit ab, nicht über ein gesenktes Soll)', async () => {
+  it('rechnet Zeitausgleich NICHT an (baut Überstunden über eine niedrigere tatsächliche Ist-Zeit ab, nicht über eine Gutschrift)', async () => {
     await setAbsence('2026-12-01', 'timeoff');
 
     const result = await getMonthTarget('2026-12');
 
-    expect(result.workingDays).toBe(22);
+    expect(result.creditedAbsenceDays).toBe(0);
+    expect(result.creditedAbsenceMinutes).toBe(0);
+  });
+
+  it('rechnet einen Urlaubstag an einem Wochenende/Feiertag NICHT an (dort gäbe es ohnehin kein Soll)', async () => {
+    // 05.12.2026 ist ein Samstag.
+    await setAbsence('2026-12-05', 'vacation');
+    // 25.12.2026 ist ein Feiertag (1. Weihnachtsfeiertag), fällt auf einen Freitag.
+    await setAbsence('2026-12-25', 'vacation');
+
+    const result = await getMonthTarget('2026-12');
+
+    expect(result.creditedAbsenceDays).toBe(0);
+    expect(result.creditedAbsenceMinutes).toBe(0);
   });
 
   it('berücksichtigt landesspezifische Feiertage nur, wenn ein Bundesland gesetzt ist', async () => {

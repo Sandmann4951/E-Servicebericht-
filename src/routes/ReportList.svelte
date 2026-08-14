@@ -193,7 +193,7 @@
         <button type="button" class="menu-backdrop" onclick={closeMenu} aria-label="Menü schließen"></button>
         <div class="menu-popup" role="menu">
           <button type="button" role="menuitem" onclick={() => menuNavigate('/statistik')}>
-            <span class="menu-icon"><Icon name="stats" /></span><span>Statistik</span>
+            <span class="menu-icon"><Icon name="stats" /></span><span>Auswertung</span>
           </button>
           <button type="button" role="menuitem" onclick={() => menuNavigate('/leerlaufzeiten')}>
             <span class="menu-icon"><Icon name="clock" /></span><span>Leerlaufzeiten zuordnen</span>
