@@ -72,6 +72,16 @@ export interface TimeEntry {
   endTime?: string; // "HH:mm"
   durationMinutes?: number;
   note?: string;
+  /**
+   * Markiert eine unbezahlte Pause (aus dem Tagesausstempeln heraus erfasst,
+   * siehe clockActions.checkOutDay()) - hat wie Leerlaufzeit nie eine
+   * reportId, zählt aber zusätzlich NIRGENDS als Arbeitszeit (weder
+   * produktiv noch Leerlaufzeit): getDayStats(), getDayProjectBreakdown()
+   * und listUnassignedIdleEntries() ignorieren Einträge mit isBreak. Kein
+   * eigener DB_VERSION-Bump nötig - ein optionales neues Feld, bestehende
+   * Einträge ohne dieses Feld gelten automatisch als "keine Pause".
+   */
+  isBreak?: boolean;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }

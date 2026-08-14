@@ -19,6 +19,14 @@
   let busy = $state(false);
   let quickClockInBusy = $state(false);
   let daySummary = $state<DaySummary | undefined>(undefined);
+
+  // Pausen-Panel beim Auschecken: statt sofort auszuchecken, fragt "Tag
+  // ausstempeln" zuerst nach evtl. gemachten Pausen (siehe checkOutDay()-
+  // Kommentar in clockActions.ts - während der Pause bleibt man laut
+  // Anleitung eingestempelt, die Zeiten werden erst hier nachgetragen).
+  let breakPanelOpen = $state(false);
+  let breakRows = $state<{ startTime: string; endTime: string }[]>([]);
+  let checkingOut = $state(false);
   /** Live-Zwischenstand des laufenden Tages (Gesamt/Projekt/Leerlaufzeit bis jetzt) - im Unterschied zu `daySummary` schon WÄHREND der Tag noch läuft, nicht erst nach dem Ausstempeln. */
   let todaySummary = $state<{ totalMinutes: number; projectMinutes: number; idleMinutes: number } | undefined>(
     undefined
@@ -77,6 +85,10 @@
     let projectMinutes = 0;
     let idleMinutes = 0;
     for (const entry of entries) {
+      // Pausen entstehen erst beim Auschecken (s.u.) - kommen hier also
+      // während der Tag noch läuft nie vor, außer man hat sich am selben
+      // Kalendertag schon einmal aus- und wieder eingestempelt.
+      if (entry.isBreak) continue;
       let minutes = entry.durationMinutes;
       if (minutes === undefined && entry.startTime && !entry.endTime) {
         minutes = computeDurationMinutes(entry.startTime, nowHHmm());
@@ -129,15 +141,38 @@
     }
   }
 
-  async function checkOut(): Promise<void> {
-    if (busy) return;
-    busy = true;
+  /** Öffnet das Pausen-Panel statt sofort auszuchecken. */
+  function openCheckoutPanel(): void {
+    breakRows = [];
+    breakPanelOpen = true;
+  }
+
+  function closeCheckoutPanel(): void {
+    breakPanelOpen = false;
+    breakRows = [];
+  }
+
+  function addBreakRow(): void {
+    breakRows = [...breakRows, { startTime: '', endTime: '' }];
+  }
+
+  function removeBreakRow(index: number): void {
+    breakRows = breakRows.filter((_, i) => i !== index);
+  }
+
+  /** Checkt aus - unvollständige Pausen-Zeilen (z.B. nur "Von" ausgefüllt) werden stillschweigend ignoriert. */
+  async function confirmCheckOut(): Promise<void> {
+    if (checkingOut) return;
+    checkingOut = true;
     try {
-      daySummary = await checkOutDay();
+      const breaks = breakRows.filter((row) => row.startTime && row.endTime);
+      daySummary = await checkOutDay(breaks);
+      breakPanelOpen = false;
+      breakRows = [];
       await load();
       onChanged();
     } finally {
-      busy = false;
+      checkingOut = false;
     }
   }
 
@@ -226,6 +261,11 @@
             <strong>{formatDurationMinutes(daySummary.idleMinutes)}</strong><span>Leerlaufzeit</span>
           </div>
         </div>
+        {#if daySummary.breakMinutes > 0}
+          <p class="break-caption">
+            davon {formatDurationMinutes(daySummary.breakMinutes)} Pause abgezogen (nicht in Gesamt enthalten)
+          </p>
+        {/if}
         <button type="button" class="dismiss" onclick={dismissSummary}>Schließen</button>
       </div>
     {:else if workDay && todaySummary}
@@ -261,19 +301,54 @@
       </div>
     {/if}
 
-    <div class="day-actions">
-      {#if !workDay}
-        <button type="button" class="check-in" onclick={checkIn} disabled={busy}><Icon name="play" size={16} />Tag einstempeln</button>
-      {/if}
-      {#if !activeReport}
-        <button type="button" class="quick-clock-in" onclick={openPicker} disabled={quickClockInBusy}>
-          + Direkt in Projekt einchecken
-        </button>
-      {/if}
-      {#if workDay}
-        <button type="button" class="check-out" onclick={checkOut} disabled={busy}><Icon name="stop" size={16} />Tag ausstempeln</button>
-      {/if}
-    </div>
+    {#if !breakPanelOpen}
+      <div class="day-actions">
+        {#if !workDay}
+          <button type="button" class="check-in" onclick={checkIn} disabled={busy}><Icon name="play" size={16} />Tag einstempeln</button>
+        {/if}
+        {#if !activeReport}
+          <button type="button" class="quick-clock-in" onclick={openPicker} disabled={quickClockInBusy}>
+            + Direkt in Projekt einchecken
+          </button>
+        {/if}
+        {#if workDay}
+          <button type="button" class="check-out" onclick={openCheckoutPanel} disabled={busy}>
+            <Icon name="stop" size={16} />Tag ausstempeln
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    {#if breakPanelOpen}
+      <div class="break-panel">
+        <p class="break-panel-title">Pause gemacht heute?</p>
+        <p class="break-panel-hint">
+          Trag die Zeiten ein - sie werden vom Projekt bzw. von der Leerlaufzeit abgezogen und zählen nicht als
+          Arbeitszeit. Ohne Angabe wird ohne Pausenabzug ausgecheckt.
+        </p>
+        {#if breakRows.length > 0}
+          <ul class="break-list">
+            {#each breakRows as row, i (i)}
+              <li class="break-row">
+                <input type="time" bind:value={row.startTime} aria-label="Pause von" />
+                <span>–</span>
+                <input type="time" bind:value={row.endTime} aria-label="Pause bis" />
+                <button type="button" class="remove-break" onclick={() => removeBreakRow(i)} aria-label="Pause entfernen">
+                  <Icon name="trash" size={16} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <button type="button" class="add-break" onclick={addBreakRow}>+ Pause hinzufügen</button>
+        <div class="break-panel-actions">
+          <button type="button" class="cancel" onclick={closeCheckoutPanel}>Abbrechen</button>
+          <button type="button" class="check-out" onclick={confirmCheckOut} disabled={checkingOut}>
+            <Icon name="stop" size={16} />Auschecken
+          </button>
+        </div>
+      </div>
+    {/if}
 
     {#if pickerOpen}
       <div class="project-picker">
@@ -388,6 +463,13 @@
     color: var(--color-open);
   }
 
+  .break-caption {
+    margin: 0;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+  }
+
   .dismiss {
     align-self: flex-start;
     background: transparent;
@@ -475,6 +557,80 @@
   .check-out:disabled,
   .quick-clock-in:disabled {
     opacity: 0.6;
+  }
+
+  .break-panel {
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .break-panel-title {
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .break-panel-hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+  }
+
+  .break-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .break-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .break-row input {
+    flex: 1;
+    background: var(--color-surface);
+  }
+
+  .break-row span {
+    color: var(--color-text-muted);
+  }
+
+  .remove-break {
+    background: transparent;
+    border: none;
+    color: var(--color-danger);
+    padding: var(--space-1);
+    min-height: auto;
+  }
+
+  .add-break {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--color-primary);
+    color: var(--color-primary);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    min-height: auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .break-panel-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .break-panel-actions .check-out {
+    flex: 1;
   }
 
   .project-picker {

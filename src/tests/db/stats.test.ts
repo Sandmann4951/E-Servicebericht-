@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
-import { getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
+import { getDayBreaks, getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -71,6 +71,35 @@ describe('getDayStats', () => {
     const stats = await getDayStats();
 
     expect(stats).toEqual([{ date: '2026-08-13', productiveMinutes: 0, idleMinutes: 45, totalMinutes: 45 }]);
+  });
+
+  it('ignoriert Pausen-Einträge (isBreak) vollständig - weder produktiv noch Leerlaufzeit', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-14', startTime: '08:00', endTime: '12:00' }); // 240 produktiv
+    await addTimeEntry(undefined, { date: '2026-08-14', startTime: '12:00', endTime: '12:30', isBreak: true }); // Pause
+
+    const stats = await getDayStats();
+
+    expect(stats).toEqual([{ date: '2026-08-14', productiveMinutes: 240, idleMinutes: 0, totalMinutes: 240 }]);
+  });
+});
+
+describe('getDayBreaks', () => {
+  it('liefert eine leere Liste ohne Pausen an dem Tag', async () => {
+    expect(await getDayBreaks('2026-08-10')).toEqual([]);
+  });
+
+  it('liefert nur die Pausen-Einträge, nach Startzeit sortiert', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' }); // Leerlaufzeit, keine Pause
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '12:00', endTime: '12:30', isBreak: true });
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '10:00', endTime: '10:15', isBreak: true });
+
+    const breaks = await getDayBreaks('2026-08-10');
+
+    expect(breaks.map((b) => [b.startTime, b.endTime, b.minutes])).toEqual([
+      ['10:00', '10:15', 15],
+      ['12:00', '12:30', 30]
+    ]);
   });
 });
 

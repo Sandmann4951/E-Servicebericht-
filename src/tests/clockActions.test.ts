@@ -234,6 +234,86 @@ describe('checkOutDay', () => {
   });
 });
 
+describe('checkOutDay mit Pausen', () => {
+  it('schneidet eine Pause aus einem Projekt-Eintrag heraus (Split) und zählt sie separat statt als Projektzeit', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    await addTimeEntry(report.id, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id }); // 480 Min.
+
+    const summary = await checkOutDay([{ startTime: '12:00', endTime: '12:30' }]);
+
+    expect(summary?.breakMinutes).toBe(30);
+    expect(summary?.projectMinutes).toBe(450);
+    expect(summary?.totalMinutes).toBe(450);
+
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.totalDurationMinutes).toBe(450);
+
+    // Ursprünglicher Eintrag wurde gesplittet: 08:00-12:00 und 12:30-16:00.
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => [e.startTime, e.endTime]).sort()).toEqual([
+      ['08:00', '12:00'],
+      ['12:30', '16:00']
+    ]);
+  });
+
+  it('summiert mehrere Pausen an einem Tag', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    const summary = await checkOutDay([
+      { startTime: '10:00', endTime: '10:15' },
+      { startTime: '12:00', endTime: '12:30' }
+    ]);
+
+    expect(summary?.breakMinutes).toBe(45);
+    expect(summary?.idleMinutes).toBe(480 - 45);
+    expect(summary?.totalMinutes).toBe(480 - 45);
+  });
+
+  it('ignoriert unvollständige Pausen-Zeilen (fehlende Start- oder Endzeit)', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    const summary = await checkOutDay([{ startTime: '12:00', endTime: '' }]);
+
+    expect(summary?.breakMinutes).toBe(0);
+    expect(summary?.totalMinutes).toBe(480);
+  });
+
+  it('legt für jede Pause einen eigenen isBreak-Eintrag an, der nicht als Leerlaufzeit zur Zuordnung auftaucht', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    await addTimeEntry(report.id, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    await checkOutDay([{ startTime: '12:00', endTime: '12:30' }]);
+
+    const all = await listTimeEntriesForWorkDay(day.id);
+    const breakEntry = all.find((e) => e.isBreak);
+    expect(breakEntry).toBeTruthy();
+    expect(breakEntry?.startTime).toBe('12:00');
+    expect(breakEntry?.endTime).toBe('12:30');
+    expect(breakEntry?.durationMinutes).toBe(30);
+    expect(breakEntry?.reportId).toBeUndefined();
+
+    // Der Pause-Eintrag selbst hat zwar keine reportId (wie Leerlaufzeit),
+    // taucht aber trotzdem NICHT in der Zuordnungs-Liste auf.
+    const unassigned = await listUnassignedIdleEntries();
+    expect(unassigned.find((e) => e.id === breakEntry?.id)).toBeUndefined();
+  });
+
+  it('ohne Pausen-Angabe ändert sich am bisherigen Verhalten nichts (breakMinutes 0)', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', endTime: '08:30', workDayId: day.id });
+
+    const summary = await checkOutDay();
+
+    expect(summary?.breakMinutes).toBe(0);
+    expect(summary?.totalMinutes).toBe(30);
+  });
+});
+
 describe('reassignIdleEntry', () => {
   it('ordnet einen Leerlaufzeit-Eintrag einem Bericht zu und aktualisiert dessen Summary', async () => {
     const report = await createReport({ projectNumber: 'A' });

@@ -62,15 +62,18 @@
 
   /**
    * Eine Zeile pro überschneidendem Eintrag, mit Projektnummer statt
-   * Berichts-ID. Ein Eintrag ohne reportId ist Leerlaufzeit (Tagesstempeluhr,
-   * siehe src/lib/clockActions.ts) - dafür gibt es keinen Bericht zu laden.
+   * Berichts-ID. Ein Eintrag ohne reportId ist entweder Leerlaufzeit oder
+   * eine beim Tagesausstempeln erfasste Pause (siehe TimeEntry.isBreak,
+   * src/lib/clockActions.ts) - für beide gibt es keinen Bericht zu laden.
    */
   async function describeOverlaps(overlaps: TimeEntry[]): Promise<string> {
     const lines = await Promise.all(
       overlaps.map(async (entry) => {
-        const label = entry.reportId
-          ? ((await getReport(entry.reportId))?.projectNumber ?? 'unbekannter Bericht')
-          : 'Leerlaufzeit';
+        const label = entry.isBreak
+          ? 'Pause'
+          : entry.reportId
+            ? ((await getReport(entry.reportId))?.projectNumber ?? 'unbekannter Bericht')
+            : 'Leerlaufzeit';
         return `• "${label}" ${entry.startTime}–${entry.endTime} Uhr`;
       })
     );

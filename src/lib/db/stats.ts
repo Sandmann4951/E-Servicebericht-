@@ -27,6 +27,9 @@ export async function getDayStats(): Promise<DayStats[]> {
   for (const entry of entries) {
     const minutes = entry.durationMinutes;
     if (!minutes) continue;
+    // Pausen (siehe TimeEntry.isBreak) zählen nirgends als Arbeitszeit -
+    // weder produktiv noch Leerlaufzeit.
+    if (entry.isBreak) continue;
     let stats = byDate.get(entry.date);
     if (!stats) {
       stats = { date: entry.date, productiveMinutes: 0, idleMinutes: 0, totalMinutes: 0 };
@@ -79,4 +82,25 @@ export async function getDayProjectBreakdown(date: ISODate): Promise<DayProjectB
   );
 
   return breakdown.sort((a, b) => b.minutes - a.minutes);
+}
+
+export interface DayBreak {
+  id: ID;
+  startTime?: string;
+  endTime?: string;
+  minutes: number;
+}
+
+/**
+ * Die beim Tagesausstempeln erfassten Pausen (siehe clockActions.checkOutDay)
+ * eines einzelnen Tages, nach Startzeit sortiert - Grundlage für die
+ * Pausen-Liste in der Statistik-Tagesansicht.
+ */
+export async function getDayBreaks(date: ISODate): Promise<DayBreak[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'date', date);
+  return entries
+    .filter((entry) => entry.isBreak)
+    .map((entry) => ({ id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 }))
+    .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 }

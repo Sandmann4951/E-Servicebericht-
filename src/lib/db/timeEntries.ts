@@ -14,6 +14,8 @@ export interface TimeEntryInput {
   note?: string;
   /** Nur von der Tagesstempeluhr gesetzt (checkInDay/switchToProject/switchToIdle), nie bei manuellen Einträgen. */
   workDayId?: ID;
+  /** Siehe TimeEntry.isBreak - nur von checkOutDay() gesetzt. */
+  isBreak?: boolean;
 }
 
 /**
@@ -71,7 +73,7 @@ export async function listUnassignedIdleEntries(): Promise<TimeEntry[]> {
   const db = await getDB();
   const all = await db.getAll('timeEntries');
   return all
-    .filter((entry) => !entry.reportId && entry.endTime)
+    .filter((entry) => !entry.reportId && !entry.isBreak && entry.endTime)
     .sort((a, b) => b.date.localeCompare(a.date) || (b.startTime ?? '').localeCompare(a.startTime ?? ''));
 }
 
@@ -178,7 +180,8 @@ export async function trimOverlappingTimeEntries(
         startTime: cutEndTime,
         endTime: entry.endTime,
         note: entry.note,
-        workDayId: entry.workDayId
+        workDayId: entry.workDayId,
+        isBreak: entry.isBreak
       });
     } else if (remainderBefore) {
       await updateTimeEntry(entry.id, { endTime: cutStartTime });
@@ -207,6 +210,7 @@ export async function addTimeEntry(reportId: ID | undefined, input: TimeEntryInp
     endTime: input.endTime || undefined,
     durationMinutes: input.durationMinutes,
     note: input.note?.trim() || undefined,
+    isBreak: input.isBreak || undefined,
     createdAt: now,
     updatedAt: now
   };

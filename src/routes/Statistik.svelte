@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
+  import { getDayBreaks, getDayProjectBreakdown, getDayStats, type DayBreak, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
+  import { deleteTimeEntry } from '../lib/db/timeEntries';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
   import type { Absence, AbsenceType } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -74,6 +75,7 @@
   let loading = $state(true);
   let view = $state<View>('monat');
   let projectBreakdown = $state<DayProjectBreakdown[]>([]);
+  let dayBreaks = $state<DayBreak[]>([]);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -114,7 +116,24 @@
     getDayProjectBreakdown(selectedDate).then((result) => {
       projectBreakdown = result;
     });
+    getDayBreaks(selectedDate).then((result) => {
+      dayBreaks = result;
+    });
   });
+
+  async function removeBreak(breakId: string): Promise<void> {
+    // Löscht nur den Pause-Datensatz selbst - die beim Anlegen der Pause
+    // gekürzten Nachbar-Einträge (siehe checkOutDay()) werden dabei bewusst
+    // NICHT automatisch wiederhergestellt (dieselbe Grenze wie beim
+    // bestehenden Überschneidungs-Wegschneiden in TimeEntrySection.svelte,
+    // wo ein Rückgängig ebenfalls nicht vorgesehen ist). Wurde die Pause
+    // versehentlich falsch eingetragen, kann die betroffene Zeit im
+    // Zeiten-Tab des jeweiligen Berichts manuell nachgetragen werden.
+    if (!confirm('Pause löschen? Die dadurch gekürzte Zeit wird NICHT automatisch wiederhergestellt.')) return;
+    await deleteTimeEntry(breakId);
+    dayBreaks = await getDayBreaks(selectedDate);
+    await load();
+  }
 
   // Soll-Stunden nur nachladen, solange die Monatsansicht aktiv ist -
   // dieselbe view-Gate-Logik wie bei der Projekt-Aufschlüsselung oben.
@@ -437,6 +456,23 @@
         {:else if dayStat.productiveMinutes === 0}
           <p class="hint">Nur Leerlaufzeit an diesem Tag, keine Projektzeiten.</p>
         {/if}
+      {/if}
+
+      {#if dayBreaks.length > 0}
+        <div class="projects">
+          <p class="section-title">Pausen</p>
+          <ul class="breakdown">
+            {#each dayBreaks as brk (brk.id)}
+              <li class="break-entry">
+                <span class="breakdown-label plain">{brk.startTime}–{brk.endTime} Uhr</span>
+                <span class="breakdown-values"><span class="idle">{formatDurationMinutes(brk.minutes)}</span></span>
+                <button type="button" class="remove-break-entry" onclick={() => removeBreak(brk.id)} aria-label="Pause löschen">
+                  <Icon name="trash" size={16} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        </div>
       {/if}
     {:else if view === 'monat'}
       <div class="nav">
@@ -930,6 +966,25 @@
     border-radius: var(--radius-md);
     padding: var(--space-3);
     text-align: left;
+    min-height: auto;
+  }
+
+  .break-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+  }
+
+  .remove-break-entry {
+    background: transparent;
+    border: none;
+    color: var(--color-danger);
+    padding: 0 0 0 var(--space-2);
     min-height: auto;
   }
 

@@ -1,5 +1,12 @@
 import { createReport, getReport, listReportsByProjectNumber } from './db/reports';
-import { addTimeEntry, getGloballyActiveTimeEntry, listTimeEntriesForDate, updateTimeEntry } from './db/timeEntries';
+import {
+  addTimeEntry,
+  findOverlappingTimeEntries,
+  getGloballyActiveTimeEntry,
+  listTimeEntriesForDate,
+  trimOverlappingTimeEntries,
+  updateTimeEntry
+} from './db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
 import type { ID, ServiceReport, WorkDay } from './db/types';
 import { nowHHmm, todayISODate } from './utils/date';
@@ -10,6 +17,14 @@ export interface DaySummary {
   projectMinutes: number;
   /** "Leerlaufzeit": eingestempelt, aber keinem Projekt zugeordnet. */
   idleMinutes: number;
+  /** Summe der beim Auschecken erfassten Pausen (siehe checkOutDay()) - bereits NICHT in totalMinutes enthalten. */
+  breakMinutes: number;
+}
+
+/** Ein beim Tagesauschecken erfasstes Pausenfenster, siehe checkOutDay(). */
+export interface BreakInput {
+  startTime: string;
+  endTime: string;
 }
 
 /**
@@ -27,9 +42,25 @@ export async function checkInDay(): Promise<WorkDay> {
 }
 
 /**
- * Schließt den aktuell offenen Abschnitt (Leerlaufzeit oder Projekt) und
- * beendet den Tagesstempel. Gibt die Tageszusammenfassung zurück, oder
- * `undefined`, wenn gerade gar kein Tag läuft.
+ * Schließt den aktuell offenen Abschnitt (Leerlaufzeit oder Projekt),
+ * schneidet optional erfasste Pausen heraus und beendet den Tagesstempel.
+ * Gibt die Tageszusammenfassung zurück, oder `undefined`, wenn gerade gar
+ * kein Tag läuft.
+ *
+ * `breaks`: Während einer Pause bleibt man laut Anleitung eingestempelt
+ * (Projekt oder Leerlaufzeit läuft einfach weiter) statt extra
+ * auszuchecken - beim Tagesausstempeln werden die tatsächlichen
+ * Pausenzeiten nachträglich angegeben. Für jede Pause wird zuerst per
+ * findOverlappingTimeEntries() geschaut, welche bereits bestehenden
+ * Projekt-/Leerlaufzeit-Abschnitte in diesem Fenster liegen (der gerade
+ * geschlossene Abschnitt zählt dabei schon mit, da er oben bereits eine
+ * endTime bekommen hat), diese werden per trimOverlappingTimeEntries()
+ * gekürzt/gesplittet (exakt dieselbe Logik wie bei manuell erfassten
+ * Überschneidungen) - die Pausenzeit fließt dadurch weder ins Projekt noch
+ * in die Leerlaufzeit ein. Zusätzlich entsteht ein eigener, isBreak-
+ * markierter Eintrag für die Pause selbst (Nachvollziehbarkeit/
+ * Lohnabrechnung, sichtbar in der Tages-Statistik) - der zählt nirgends
+ * als Arbeitszeit (siehe TimeEntry.isBreak).
  *
  * Die Zusammenfassung umfasst bewusst den GANZEN Kalendertag (`active.date`),
  * nicht nur diesen einen WorkDay-Datensatz: wurde am selben Tag bereits
@@ -38,7 +69,7 @@ export async function checkInDay(): Promise<WorkDay> {
  * addieren, statt bei jedem erneuten Einstempeln wieder bei 0 anzufangen
  * (siehe listTimeEntriesForDate()).
  */
-export async function checkOutDay(): Promise<DaySummary | undefined> {
+export async function checkOutDay(breaks: BreakInput[] = []): Promise<DaySummary | undefined> {
   const active = await getActiveWorkDay();
   if (!active) return undefined;
 
@@ -47,18 +78,43 @@ export async function checkOutDay(): Promise<DaySummary | undefined> {
     await updateTimeEntry(openEntry.id, { endTime: nowHHmm() });
   }
 
+  for (const brk of breaks) {
+    if (!brk.startTime || !brk.endTime) continue;
+    const overlaps = await findOverlappingTimeEntries(active.date, brk.startTime, brk.endTime);
+    await trimOverlappingTimeEntries(overlaps, brk.startTime, brk.endTime);
+    await addTimeEntry(undefined, {
+      date: active.date,
+      startTime: brk.startTime,
+      endTime: brk.endTime,
+      workDayId: active.id,
+      isBreak: true
+    });
+  }
+
   const closedDay = await checkOutWorkDay(active.id);
   if (!closedDay) return undefined;
 
   const entries = await listTimeEntriesForDate(active.date);
   let projectMinutes = 0;
   let idleMinutes = 0;
+  let breakMinutes = 0;
   for (const entry of entries) {
     const minutes = entry.durationMinutes ?? 0;
-    if (entry.reportId) projectMinutes += minutes;
-    else idleMinutes += minutes;
+    if (entry.isBreak) {
+      breakMinutes += minutes;
+    } else if (entry.reportId) {
+      projectMinutes += minutes;
+    } else {
+      idleMinutes += minutes;
+    }
   }
-  return { workDay: closedDay, totalMinutes: projectMinutes + idleMinutes, projectMinutes, idleMinutes };
+  return {
+    workDay: closedDay,
+    totalMinutes: projectMinutes + idleMinutes,
+    projectMinutes,
+    idleMinutes,
+    breakMinutes
+  };
 }
 
 /**
