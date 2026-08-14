@@ -1,22 +1,72 @@
 <script lang="ts">
   import { getDayProjectBreakdown, getDayStats, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
+  import { listAbsencesInRange } from '../lib/db/absences';
+  import type { Absence } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
-  import { formatDurationMinutes, todayISODate } from '../lib/utils/date';
+  import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
+  import { computeDayStatus, type DayStatus } from '../lib/utils/calendarDay';
+  import { getGermanHolidays } from '../lib/utils/holidays';
+  import { getBundesland } from '../lib/settings';
   import Icon from '../lib/components/Icon.svelte';
 
-  type View = 'tag' | 'monat' | 'jahr';
+  type View = 'tag' | 'monat' | 'jahr' | 'kalender';
+  type CalendarMode = 'monat' | 'woche';
+
+  interface CalendarCell {
+    date: string;
+    dayOfMonth: number;
+    status: DayStatus;
+  }
+
+  const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
+  // Reihenfolge bestimmt auch die Legenden-Reihenfolge in der Kalender-Ansicht.
+  const LEGEND_STATUSES: DayStatus[] = ['open', 'booked', 'holiday', 'vacation', 'sick', 'timeoff', 'weekend'];
+
+  const STATUS_BG: Record<DayStatus, string> = {
+    vacation: 'var(--color-vacation-bg)',
+    sick: 'var(--color-sick-bg)',
+    timeoff: 'var(--color-timeoff-bg)',
+    holiday: 'var(--color-holiday-bg)',
+    booked: 'var(--color-completed-bg)',
+    weekend: 'var(--color-surface-muted)',
+    open: 'var(--color-open-bg)'
+  };
+
+  const STATUS_FG: Record<DayStatus, string> = {
+    vacation: 'var(--color-vacation)',
+    sick: 'var(--color-sick)',
+    timeoff: 'var(--color-timeoff)',
+    holiday: 'var(--color-holiday)',
+    booked: 'var(--color-completed)',
+    weekend: 'var(--color-text-muted)',
+    open: 'var(--color-open)'
+  };
+
+  const STATUS_LABELS: Record<DayStatus, string> = {
+    vacation: 'Urlaub',
+    sick: 'Krank',
+    timeoff: 'Zeitausgleich',
+    holiday: 'Feiertag',
+    booked: 'Gebucht',
+    weekend: 'Wochenende',
+    open: 'Offen'
+  };
 
   let dayStats = $state<DayStats[]>([]);
   let loading = $state(true);
   let view = $state<View>('monat');
   let projectBreakdown = $state<DayProjectBreakdown[]>([]);
   let monthTarget = $state<MonthTarget>({ targetMinutes: 0, workingDays: 0 });
+  let calendarMode = $state<CalendarMode>('monat');
+  let calendarAbsences = $state<Absence[]>([]);
 
   const today = todayISODate();
   let selectedDate = $state(today);
   let selectedMonth = $state(today.slice(0, 7)); // "YYYY-MM"
   let selectedYear = $state(Number(today.slice(0, 4)));
+  let selectedWeekStart = $state(startOfWeekISO(today));
 
   async function load(): Promise<void> {
     loading = true;
@@ -48,6 +98,19 @@
     });
   });
 
+  // Abwesenheiten für den sichtbaren Kalender-Zeitraum (Monat oder Woche)
+  // nachladen - dieselbe view-Gate-Logik wie oben.
+  $effect(() => {
+    if (view !== 'kalender') return;
+    const range =
+      calendarMode === 'monat'
+        ? { start: `${selectedMonth}-01`, end: `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, '0')}` }
+        : { start: selectedWeekStart, end: shiftDate(selectedWeekStart, 6) };
+    listAbsencesInRange(range.start, range.end).then((result) => {
+      calendarAbsences = result;
+    });
+  });
+
   function emptyStats(date: string): DayStats {
     return { date, productiveMinutes: 0, idleMinutes: 0, totalMinutes: 0 };
   }
@@ -69,6 +132,11 @@
     const dt = new Date(y, m - 1, d);
     dt.setDate(dt.getDate() + deltaDays);
     return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  function daysInMonth(ym: string): number {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
   }
 
   function shiftMonth(ym: string, deltaMonths: number): string {
@@ -97,6 +165,20 @@
   function formatMonthShortDE(ym: string): string {
     const [y, m] = ym.split('-').map(Number);
     return new Date(y, m - 1, 1).toLocaleDateString('de-DE', { month: 'short' });
+  }
+
+  /** Formatiert eine Kalenderwoche als "10.–16. Aug 2026" (Montag bis Sonntag). */
+  function formatWeekRangeDE(start: string): string {
+    const end = shiftDate(start, 6);
+    const [sy, sm, sd] = start.split('-').map(Number);
+    const [ey, em, ed] = end.split('-').map(Number);
+    const startLabel = new Date(sy, sm - 1, sd).toLocaleDateString('de-DE', { day: '2-digit' });
+    const endLabel = new Date(ey, em - 1, ed).toLocaleDateString('de-DE', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
+    });
+    return `${startLabel}.–${endLabel}`;
   }
 
   function productivePercent(stats: DayStats): number {
@@ -135,6 +217,71 @@
   });
   const yearTotal = $derived.by(() => sumStats(yearMonths));
 
+  // Monatsraster für die Kalender-Ansicht: führende `null`-Zellen füllen die
+  // erste Woche auf Montag-Start auf (typisches Kalenderlayout), danach ein
+  // Eintrag pro Tag des Monats. Keine trainierenden Blindzellen am Ende -
+  // die letzte Reihe darf im CSS-Grid einfach kürzer enden.
+  const calendarMonthCells = $derived.by((): (CalendarCell | null)[] => {
+    if (view !== 'kalender' || calendarMode !== 'monat') return [];
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const totalDays = daysInMonth(selectedMonth);
+    const firstWeekday = new Date(year, month - 1, 1).getDay(); // 0=So, 1=Mo, ...
+    const leadingBlanks = firstWeekday === 0 ? 6 : firstWeekday - 1;
+
+    const absenceByDate = new Map(calendarAbsences.map((a) => [a.date, a.type]));
+    const statsByDate = new Map(dayStats.map((d) => [d.date, d]));
+    const holidays = getGermanHolidays(year, getBundesland());
+
+    const cells: (CalendarCell | null)[] = Array.from({ length: leadingBlanks }, () => null);
+    for (let day = 1; day <= totalDays; day++) {
+      const date = `${selectedMonth}-${String(day).padStart(2, '0')}`;
+      cells.push({
+        date,
+        dayOfMonth: day,
+        status: computeDayStatus({
+          date,
+          isHoliday: holidays.has(date),
+          absenceType: absenceByDate.get(date),
+          hasBookedTime: (statsByDate.get(date)?.totalMinutes ?? 0) > 0
+        })
+      });
+    }
+    return cells;
+  });
+
+  // Wochenraster: immer genau 7 Tage ab selectedWeekStart (Montag). Kann über
+  // einen Jahreswechsel laufen (z.B. 29.12.-04.01.) - Feiertage für beide
+  // betroffenen Jahre laden und zusammenführen.
+  const calendarWeekCells = $derived.by((): CalendarCell[] => {
+    if (view !== 'kalender' || calendarMode !== 'woche') return [];
+    const absenceByDate = new Map(calendarAbsences.map((a) => [a.date, a.type]));
+    const statsByDate = new Map(dayStats.map((d) => [d.date, d]));
+
+    const bundesland = getBundesland();
+    const startYear = Number(selectedWeekStart.slice(0, 4));
+    const endYear = Number(shiftDate(selectedWeekStart, 6).slice(0, 4));
+    const holidays = getGermanHolidays(startYear, bundesland);
+    if (endYear !== startYear) {
+      for (const [date, name] of getGermanHolidays(endYear, bundesland)) holidays.set(date, name);
+    }
+
+    const cells: CalendarCell[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = shiftDate(selectedWeekStart, i);
+      cells.push({
+        date,
+        dayOfMonth: Number(date.slice(8, 10)),
+        status: computeDayStatus({
+          date,
+          isHoliday: holidays.has(date),
+          absenceType: absenceByDate.get(date),
+          hasBookedTime: (statsByDate.get(date)?.totalMinutes ?? 0) > 0
+        })
+      });
+    }
+    return cells;
+  });
+
   function openDay(date: string): void {
     selectedDate = date;
     view = 'tag';
@@ -156,6 +303,7 @@
     <button type="button" class:active={view === 'tag'} onclick={() => (view = 'tag')}>Tag</button>
     <button type="button" class:active={view === 'monat'} onclick={() => (view = 'monat')}>Monat</button>
     <button type="button" class:active={view === 'jahr'} onclick={() => (view = 'jahr')}>Jahr</button>
+    <button type="button" class:active={view === 'kalender'} onclick={() => (view = 'kalender')}>Kalender</button>
   </div>
 
   <div class="content">
@@ -240,7 +388,7 @@
           {/each}
         </ul>
       {/if}
-    {:else}
+    {:else if view === 'jahr'}
       <div class="nav">
         <button type="button" onclick={() => (selectedYear -= 1)} aria-label="Vorheriges Jahr"><Icon name="chevron-left" /></button>
         <button type="button" class="nav-label" onclick={() => (selectedYear = Number(today.slice(0, 4)))}>
@@ -267,6 +415,108 @@
           {/each}
         </ul>
       {/if}
+    {:else}
+      <div class="calendar-toggle" role="tablist" aria-label="Kalender-Ansicht wählen">
+        <button type="button" class:active={calendarMode === 'monat'} onclick={() => (calendarMode = 'monat')}>
+          Monat
+        </button>
+        <button type="button" class:active={calendarMode === 'woche'} onclick={() => (calendarMode = 'woche')}>
+          Woche
+        </button>
+      </div>
+
+      {#if calendarMode === 'monat'}
+        <div class="nav">
+          <button
+            type="button"
+            onclick={() => (selectedMonth = shiftMonth(selectedMonth, -1))}
+            aria-label="Vorheriger Monat"
+          >
+            <Icon name="chevron-left" />
+          </button>
+          <button type="button" class="nav-label" onclick={() => (selectedMonth = today.slice(0, 7))}>
+            {formatMonthDE(selectedMonth)}
+          </button>
+          <button
+            type="button"
+            onclick={() => (selectedMonth = shiftMonth(selectedMonth, 1))}
+            aria-label="Nächster Monat"
+          >
+            <Icon name="chevron-right" />
+          </button>
+        </div>
+
+        <div class="calendar-grid">
+          {#each WEEKDAY_LABELS as label (label)}
+            <div class="calendar-weekday">{label}</div>
+          {/each}
+          {#each calendarMonthCells as cell, i (cell?.date ?? `blank-${i}`)}
+            {#if cell}
+              <button
+                type="button"
+                class="calendar-cell"
+                class:today={cell.date === today}
+                style:background={STATUS_BG[cell.status]}
+                style:color={STATUS_FG[cell.status]}
+                onclick={() => openDay(cell.date)}
+                aria-label="{formatDateLongDE(cell.date)}: {STATUS_LABELS[cell.status]}"
+              >
+                {cell.dayOfMonth}
+              </button>
+            {:else}
+              <div class="calendar-cell blank" aria-hidden="true"></div>
+            {/if}
+          {/each}
+        </div>
+      {:else}
+        <div class="nav">
+          <button
+            type="button"
+            onclick={() => (selectedWeekStart = shiftDate(selectedWeekStart, -7))}
+            aria-label="Vorherige Woche"
+          >
+            <Icon name="chevron-left" />
+          </button>
+          <button type="button" class="nav-label" onclick={() => (selectedWeekStart = startOfWeekISO(today))}>
+            {formatWeekRangeDE(selectedWeekStart)}
+          </button>
+          <button
+            type="button"
+            onclick={() => (selectedWeekStart = shiftDate(selectedWeekStart, 7))}
+            aria-label="Nächste Woche"
+          >
+            <Icon name="chevron-right" />
+          </button>
+        </div>
+
+        <div class="calendar-grid">
+          {#each WEEKDAY_LABELS as label (label)}
+            <div class="calendar-weekday">{label}</div>
+          {/each}
+          {#each calendarWeekCells as cell (cell.date)}
+            <button
+              type="button"
+              class="calendar-cell"
+              class:today={cell.date === today}
+              style:background={STATUS_BG[cell.status]}
+              style:color={STATUS_FG[cell.status]}
+              onclick={() => openDay(cell.date)}
+              aria-label="{formatDateLongDE(cell.date)}: {STATUS_LABELS[cell.status]}"
+            >
+              {cell.dayOfMonth}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      <ul class="legend">
+        {#each LEGEND_STATUSES as status (status)}
+          <li>
+            <span class="legend-dot" style:background={STATUS_FG[status]}></span>
+            {STATUS_LABELS[status]}
+          </li>
+        {/each}
+      </ul>
     {/if}
   </div>
 </div>
@@ -535,5 +785,89 @@
 
   .breakdown-values .idle {
     color: var(--color-open);
+  }
+
+  .calendar-toggle {
+    display: flex;
+    gap: var(--space-2);
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+  }
+
+  .calendar-toggle button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
+    padding: var(--space-2);
+    min-height: auto;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .calendar-toggle button.active {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 1px 2px var(--color-shadow);
+  }
+
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  .calendar-weekday {
+    text-align: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    padding-bottom: 2px;
+  }
+
+  .calendar-cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 600;
+    min-height: auto;
+    padding: 0;
+  }
+
+  .calendar-cell.blank {
+    background: transparent;
+  }
+
+  .calendar-cell.today {
+    box-shadow: inset 0 0 0 2px var(--color-primary);
+  }
+
+  .legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+  }
+
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
   }
 </style>

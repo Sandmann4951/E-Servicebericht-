@@ -58,6 +58,22 @@
      nur eine Erinnerung. */
   --color-unexported: var(--color-text-muted);
   --color-unexported-bg: var(--color-surface-muted);
+  /* Kalender-Ansicht der Statistik (Statistik.svelte): je ein Farbpaar pro
+     Tages-Status. Bewusst eigene Töne statt Wiederverwendung von
+     --color-signed/--color-finalized etc. - diese vier Status stehen
+     gleichzeitig nebeneinander in einem einzigen Monatsraster und müssen
+     auf einen Blick unterscheidbar sein, nicht nur einzeln kontextuell wie
+     die Bericht-Status-Badges. "Gebucht" nutzt bewusst --color-completed
+     (bereits etablierte Bedeutung "produktive Zeit"), "Offen" bewusst
+     --color-open (bereits etablierte Bedeutung "wartet/unvollständig"). */
+  --color-vacation: #0891b2;
+  --color-vacation-bg: #cffafe;
+  --color-sick: #db2777;
+  --color-sick-bg: #fce7f3;
+  --color-timeoff: #7c3aed;
+  --color-timeoff-bg: #ede9fe;
+  --color-holiday: #64748b;
+  --color-holiday-bg: #e2e8f0;
   /* Rivo-Markenakzent (aus dem Logo: Lime-Grün #a3e635 auf dunklem Badge) -
      für Fließtext auf hellem Grund abgedunkelt (Lesbarkeit), z.B. der
      "R" in "Rivo" im Header. Das Logo selbst bleibt unverändert #a3e635. */
@@ -118,6 +134,14 @@
   --color-finalized-bg: rgba(203, 213, 225, 0.14);
   --color-unexported: var(--color-text-muted);
   --color-unexported-bg: var(--color-surface-muted);
+  --color-vacation: #22d3ee;
+  --color-vacation-bg: rgba(34, 211, 238, 0.16);
+  --color-sick: #f472b6;
+  --color-sick-bg: rgba(244, 114, 182, 0.16);
+  --color-timeoff: #a78bfa;
+  --color-timeoff-bg: rgba(167, 139, 250, 0.16);
+  --color-holiday: #94a3b8;
+  --color-holiday-bg: rgba(148, 163, 184, 0.16);
   /* Im Dunkel-Theme ist Lime bereits die Primärfarbe - der Header-"R"
      braucht keine separate Abdunkelung mehr wie im Hell-Theme. */
   --color-brand-accent: #a3e635;

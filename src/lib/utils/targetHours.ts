@@ -11,16 +11,23 @@ export interface MonthTarget {
 
 /**
  * Soll-Stunden für einen Kalendermonat ("YYYY-MM"): Anzahl der Werktage
- * (Mo-Fr), die weder Feiertag noch als Abwesenheit (Urlaub/Krank/
- * Zeitausgleich, siehe db/absences.ts) eingetragen sind, mal Sollstunden pro
- * Tag (Sollstunden pro Woche ÷ 5 - Annahme 5-Tage-Woche, siehe Hinweistext in
- * Einstellungen.svelte).
+ * (Mo-Fr), die weder Feiertag noch als Urlaub/Krank eingetragen sind, mal
+ * Sollstunden pro Tag (Sollstunden pro Woche ÷ 5 - Annahme 5-Tage-Woche,
+ * siehe Hinweistext in Einstellungen.svelte).
  *
- * Bewusst ein "Ausschluss"-Modell: Abwesenheitstage fließen weder in den Soll-
- * noch in den Ist-Wert ein, statt sie mit einer fiktiven Ist-Zeit
- * "gutzuschreiben" - einfacher zu verstehen (Soll sinkt automatisch mit jeder
- * Abwesenheit) und ohne Sonderfall in der Ist-Berechnung (getDayStats() bleibt
- * unverändert, kennt Abwesenheiten gar nicht).
+ * Bewusst ein "Ausschluss"-Modell für Urlaub/Krank: an diesen Tagen MUSS
+ * weniger gearbeitet werden, das Soll sinkt also automatisch mit jedem
+ * Urlaubs-/Kranktag, statt die fehlende Zeit mit einer fiktiven Ist-Zeit
+ * "gutzuschreiben" - einfacher zu verstehen, und die Ist-Berechnung
+ * (getDayStats()) bleibt dadurch unverändert, kennt Abwesenheiten gar nicht.
+ *
+ * Zeitausgleich (ZA) wird bewusst NICHT ausgeschlossen: ein ZA-Tag baut
+ * bereits an anderer Stelle erarbeitete Überstunden ab, indem an diesem Tag
+ * einfach weniger/nicht gestempelt wird - das Soll bleibt unverändert, die
+ * niedrigere Ist-Zeit an diesem Tag spiegelt den ZA-Abbau ganz von selbst in
+ * der Differenz wider. Das Soll zusätzlich zu senken würde den Effekt
+ * doppelt zählen (die App führt bewusst kein monatsübergreifendes
+ * Zeitkonto/Überstunden-Saldo, siehe README).
  */
 export async function getMonthTarget(yearMonth: string): Promise<MonthTarget> {
   const [year, month] = yearMonth.split('-').map(Number);
@@ -29,7 +36,9 @@ export async function getMonthTarget(yearMonth: string): Promise<MonthTarget> {
   const monthEnd = `${yearMonth}-${String(daysInMonth).padStart(2, '0')}`;
 
   const absences = await listAbsencesInRange(monthStart, monthEnd);
-  const absenceDates = new Set(absences.map((absence) => absence.date));
+  const absenceDates = new Set(
+    absences.filter((absence) => absence.type === 'vacation' || absence.type === 'sick').map((absence) => absence.date)
+  );
   const holidays = getGermanHolidays(year, getBundesland());
   const weeklyTargetHours = getWeeklyTargetHours();
 

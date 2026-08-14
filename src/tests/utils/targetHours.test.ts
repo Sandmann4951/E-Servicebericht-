@@ -43,13 +43,29 @@ describe('getMonthTarget', () => {
     expect(result.targetMinutes).toBe(22 * 6 * 60); // 6 Std./Tag bei 30 Std./Woche
   });
 
-  it('zieht eingetragene Abwesenheiten (Urlaub/Krank/Zeitausgleich) von den Werktagen ab', async () => {
+  it('zieht Urlaub von den Werktagen ab', async () => {
     // 01.12.2026 ist ein Dienstag (Werktag) - als Urlaub eingetragen zählt er nicht mehr zum Soll.
     await setAbsence('2026-12-01', 'vacation');
 
     const result = await getMonthTarget('2026-12');
 
     expect(result.workingDays).toBe(21);
+  });
+
+  it('zieht auch Krank von den Werktagen ab', async () => {
+    await setAbsence('2026-12-01', 'sick');
+
+    const result = await getMonthTarget('2026-12');
+
+    expect(result.workingDays).toBe(21);
+  });
+
+  it('zieht Zeitausgleich NICHT von den Werktagen ab (baut Überstunden über eine niedrigere Ist-Zeit ab, nicht über ein gesenktes Soll)', async () => {
+    await setAbsence('2026-12-01', 'timeoff');
+
+    const result = await getMonthTarget('2026-12');
+
+    expect(result.workingDays).toBe(22);
   });
 
   it('berücksichtigt landesspezifische Feiertage nur, wenn ein Bundesland gesetzt ist', async () => {
