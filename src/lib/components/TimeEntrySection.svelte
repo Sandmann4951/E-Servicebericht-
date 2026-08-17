@@ -10,6 +10,7 @@
   import { getReport } from '../db/reports';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
+  import { exceedsMaxDailyWork } from '../utils/arbzg';
   import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
@@ -145,13 +146,19 @@
     {#if entries.length > 0}
       <ul class="list">
         {#each entries as entry (entry.id)}
-          <li class="row">
+          {@const exceedsMax = exceedsMaxDailyWork(entry.durationMinutes)}
+          <li class="row" class:exceeds-max={exceedsMax}>
             {#if locked}
               <div class="row-main">
                 <span class="date">{formatDateDE(entry.date)}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
+                  {#if exceedsMax}
+                    <span class="max-hint" title="Überschreitet die gesetzliche Höchstarbeitszeit (10 Std./Tag) - bitte prüfen.">
+                      <Icon name="alert-triangle" size={13} />
+                    </span>
+                  {/if}
                 </span>
                 {#if entry.note}<span class="note">{entry.note}</span>{/if}
               </div>
@@ -161,6 +168,11 @@
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
+                  {#if exceedsMax}
+                    <span class="max-hint" title="Überschreitet die gesetzliche Höchstarbeitszeit (10 Std./Tag) - bitte prüfen.">
+                      <Icon name="alert-triangle" size={13} />
+                    </span>
+                  {/if}
                 </span>
                 {#if entry.note}<span class="note">{entry.note}</span>{/if}
               </button>
@@ -246,6 +258,11 @@
     border-radius: var(--radius-md);
   }
 
+  .row.exceeds-max {
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger);
+  }
+
   .row-main {
     flex: 1;
     text-align: left;
@@ -265,6 +282,14 @@
   .meta {
     font-size: 0.85rem;
     color: var(--color-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .max-hint {
+    display: inline-flex;
+    color: var(--color-danger);
   }
 
   .note {

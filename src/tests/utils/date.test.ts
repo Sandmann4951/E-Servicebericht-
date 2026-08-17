@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addMinutesToTime,
   computeDurationMinutes,
   formatDateDE,
   formatDurationMinutes,
@@ -57,6 +58,22 @@ describe('todayISODate', () => {
 describe('nowHHmm', () => {
   it('liefert die aktuelle Uhrzeit im Format "HH:mm"', () => {
     expect(nowHHmm()).toMatch(/^\d{2}:\d{2}$/);
+  });
+});
+
+describe('addMinutesToTime', () => {
+  it('addiert Minuten innerhalb desselben Tages', () => {
+    expect(addMinutesToTime('08:00', 90)).toBe('09:30');
+    expect(addMinutesToTime('06:00', 600)).toBe('16:00');
+  });
+
+  it('wraps über Mitternacht (Modulo 24h)', () => {
+    expect(addMinutesToTime('22:00', 600)).toBe('08:00');
+    expect(addMinutesToTime('23:30', 60)).toBe('00:30');
+  });
+
+  it('liefert die Eingabe unverändert bei ungültigem Format', () => {
+    expect(addMinutesToTime('nicht-valide', 60)).toBe('nicht-valide');
   });
 });
 

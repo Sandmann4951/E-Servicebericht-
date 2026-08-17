@@ -38,8 +38,16 @@ export async function checkInWorkDay(): Promise<WorkDay> {
   return day;
 }
 
-/** Beendet einen Tagesstempel (setzt checkOutTime). Read-mutate-write in einer Transaktion, analog withReportTransaction(). */
-export async function checkOutWorkDay(id: ID): Promise<WorkDay | undefined> {
+/**
+ * Beendet einen Tagesstempel (setzt checkOutTime). Read-mutate-write in einer
+ * Transaktion, analog withReportTransaction(). `checkOutTime` ist optional
+ * und fällt standardmäßig auf "jetzt" zurück - explizit übergeben wird sie
+ * nur beim automatischen Ausstempeln wegen Überschreitung der gesetzlichen
+ * Höchstarbeitszeit (siehe clockActions.autoCheckOutIfExceeded()), das
+ * bewusst auf Einstempelzeit + Höchstarbeitszeit kappt statt auf den
+ * tatsächlichen (ggf. viel späteren) Erkennungszeitpunkt.
+ */
+export async function checkOutWorkDay(id: ID, checkOutTime: string = nowHHmm()): Promise<WorkDay | undefined> {
   const db = await getDB();
   const tx = db.transaction('workDays', 'readwrite');
   const store = tx.objectStore('workDays');
@@ -48,7 +56,7 @@ export async function checkOutWorkDay(id: ID): Promise<WorkDay | undefined> {
     await tx.done;
     return undefined;
   }
-  day.checkOutTime = nowHHmm();
+  day.checkOutTime = checkOutTime;
   day.updatedAt = new Date().toISOString();
   await store.put(day);
   await tx.done;

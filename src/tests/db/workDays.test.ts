@@ -40,6 +40,14 @@ describe('checkInWorkDay / getActiveWorkDay / checkOutWorkDay', () => {
     expect(await checkOutWorkDay('unbekannt')).toBeUndefined();
   });
 
+  it('übernimmt eine explizit übergebene checkOutTime statt "jetzt" (z.B. beim automatischen Ausstempeln wegen Höchstarbeitszeit)', async () => {
+    const day = await checkInWorkDay();
+
+    const closed = await checkOutWorkDay(day.id, '18:00');
+
+    expect(closed?.checkOutTime).toBe('18:00');
+  });
+
   it('getWorkDay liefert den Tagesstempel per id', async () => {
     const day = await checkInWorkDay();
 

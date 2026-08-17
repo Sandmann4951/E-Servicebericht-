@@ -7,6 +7,7 @@
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
+  import { exceedsMaxDailyWork } from '../lib/utils/arbzg';
   import { SvelteSet } from 'svelte/reactivity';
   import { computeDayStatus, type DayStatus } from '../lib/utils/calendarDay';
   import { getGermanHolidays } from '../lib/utils/holidays';
@@ -826,8 +827,16 @@
         {#if isExpanded}
           <ul class="entry-list">
             {#each project.entries as entry (entry.id)}
-              <li class="entry-row">
-                <span>{entry.startTime ?? '?'}–{entry.endTime ?? '?'} Uhr</span>
+              {@const exceedsMax = exceedsMaxDailyWork(entry.minutes)}
+              <li class="entry-row" class:exceeds-max={exceedsMax}>
+                <span>
+                  {entry.startTime ?? '?'}–{entry.endTime ?? '?'} Uhr
+                  {#if exceedsMax}
+                    <span class="max-hint" title="Überschreitet die gesetzliche Höchstarbeitszeit (10 Std./Tag) - bitte prüfen.">
+                      <Icon name="alert-triangle" size={13} />
+                    </span>
+                  {/if}
+                </span>
                 <span class="productive">{formatDurationMinutes(entry.minutes)}</span>
               </li>
             {/each}
@@ -1109,6 +1118,20 @@
   .entry-row .productive {
     color: var(--color-completed);
     font-weight: 600;
+  }
+
+  .entry-row.exceeds-max {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    margin: 0 calc(var(--space-2) * -1);
+  }
+
+  .entry-row .max-hint {
+    display: inline-flex;
+    color: var(--color-danger);
+    vertical-align: -2px;
   }
 
   .break-entry {

@@ -50,6 +50,25 @@ export function computeDurationMinutes(startTime: string, endTime: string): numb
   return diff >= 0 ? diff : diff + 24 * 60;
 }
 
+/**
+ * Addiert `minutes` Minuten zu einer "HH:mm"-Zeit, mit Wraparound über
+ * Mitternacht (Modulo 24h) - z.B. für eine automatisch gekappte Auscheck-Zeit
+ * (siehe clockActions.autoCheckOutIfExceeded()). Läuft das Ergebnis über
+ * Mitternacht, entsteht dieselbe "kleiner als die Startzeit"-Situation, die
+ * computeDurationMinutes() bereits als Überschneidung über Mitternacht hinweg
+ * interpretiert - beide Funktionen bleiben so konsistent zueinander. Liefert
+ * die unveränderte Eingabe zurück, wenn `time` kein gültiges "HH:mm" ist.
+ */
+export function addMinutesToTime(time: string, minutes: number): string {
+  const start = parseTimeToMinutes(time);
+  if (start === undefined) return time;
+  const dayMinutes = 24 * 60;
+  const total = ((start + minutes) % dayMinutes + dayMinutes) % dayMinutes;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
 /** Formatiert Minuten als "H:MM Std." für die Anzeige (z.B. "7:30 Std."). */
 export function formatDurationMinutes(totalMinutes: number | undefined | null): string {
   const minutesTotal = Math.max(0, totalMinutes ?? 0);

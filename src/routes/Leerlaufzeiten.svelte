@@ -5,6 +5,7 @@
   import type { ServiceReport, TimeEntry } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDateDE, formatDurationMinutes } from '../lib/utils/date';
+  import { exceedsMaxDailyWork } from '../lib/utils/arbzg';
   import Icon from '../lib/components/Icon.svelte';
 
   let entries = $state<TimeEntry[]>([]);
@@ -80,12 +81,18 @@
     {:else}
       <ul class="list">
         {#each entries as entry (entry.id)}
-          <li class="row">
+          {@const exceedsMax = exceedsMaxDailyWork(entry.durationMinutes)}
+          <li class="row" class:exceeds-max={exceedsMax}>
             <div class="row-main">
               <span class="date">{formatDateDE(entry.date)}</span>
               <span class="meta">
                 {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                 {formatDurationMinutes(entry.durationMinutes)}
+                {#if exceedsMax}
+                  <span class="max-hint" title="Überschreitet die gesetzliche Höchstarbeitszeit (10 Std./Tag) - bitte prüfen.">
+                    <Icon name="alert-triangle" size={13} />
+                  </span>
+                {/if}
               </span>
             </div>
             <button type="button" class="assign" onclick={() => openPicker(entry.id)}>Zuordnen</button>
@@ -189,6 +196,11 @@
     border-radius: var(--radius-md);
   }
 
+  .row.exceeds-max {
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger);
+  }
+
   .row-main {
     flex: 1;
     padding: var(--space-3);
@@ -204,6 +216,14 @@
   .meta {
     font-size: 0.85rem;
     color: var(--color-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .max-hint {
+    display: inline-flex;
+    color: var(--color-danger);
   }
 
   .assign {

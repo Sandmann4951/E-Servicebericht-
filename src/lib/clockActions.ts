@@ -9,7 +9,8 @@ import {
 } from './db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
 import type { ID, ServiceReport, WorkDay } from './db/types';
-import { nowHHmm, todayISODate } from './utils/date';
+import { addMinutesToTime, nowHHmm, todayISODate } from './utils/date';
+import { MAX_DAILY_WORK_MINUTES } from './utils/arbzg';
 
 export interface DaySummary {
   workDay: WorkDay;
@@ -140,6 +141,59 @@ export async function checkOutDay(breaks: BreakInput[] = []): Promise<DaySummary
     idleMinutes,
     breakMinutes
   };
+}
+
+export interface AutoCheckOutResult {
+  workDay: WorkDay;
+  /** Die (gekappte) Auscheck-Zeit "HH:mm", auf die die gesetzliche Höchstarbeitszeit begrenzt wurde. */
+  cappedAt: string;
+}
+
+/**
+ * Stempelt automatisch aus, wenn der laufende Tagesstempel die gesetzliche
+ * Höchstarbeitszeit (siehe MAX_DAILY_WORK_MINUTES, §3 ArbZG) bereits
+ * überschritten hat - typisches Zeichen dafür, dass schlicht vergessen
+ * wurde, manuell auszustempeln (z.B. über Nacht eingestempelt geblieben,
+ * oder Handy/App einfach liegen gelassen), statt tatsächlich so lange
+ * gearbeitet worden zu sein. Ohne Effekt (liefert `undefined`), solange kein
+ * Tag aktiv ist oder die Höchstarbeitszeit noch nicht erreicht ist.
+ *
+ * Wird beim Öffnen der App und periodisch aufgerufen, solange sie geöffnet
+ * ist (siehe DayClock.svelte) - eine tatsächliche Überschreitung kann sich
+ * also erst mit Verzögerung bemerkbar machen, wenn die App zwischenzeitlich
+ * geschlossen war. Die verstrichene Zeit wird bewusst über die echte
+ * Kalender-Differenz (WorkDay.date + checkInTime bis jetzt) statt nur über
+ * "HH:mm"-Arithmetik berechnet, damit auch ein über mehrere Tage
+ * vergessenes Auschecken zuverlässig erkannt wird.
+ *
+ * Die Auscheck-Zeit wird bewusst NICHT auf "jetzt" gesetzt (das könnte, je
+ * nachdem wann die App das nächste Mal geöffnet wird, viele Stunden oder
+ * sogar Tage später sein und eine völlig unplausible Dauer ergeben),
+ * sondern exakt auf Einstempelzeit + Höchstarbeitszeit gekappt - ein klar
+ * erkennbarer, runder Platzhalterwert, den der Nutzer anschließend bewusst
+ * prüfen und ggf. korrigieren soll (siehe Hinweis-Banner in DayClock.svelte).
+ */
+export async function autoCheckOutIfExceeded(): Promise<AutoCheckOutResult | undefined> {
+  const active = await getActiveWorkDay();
+  const checkInTime = active?.checkInTime;
+  if (!active || !checkInTime) return undefined;
+
+  const [y, m, d] = active.date.split('-').map(Number);
+  const [hh, mm] = checkInTime.split(':').map(Number);
+  const checkedInAt = new Date(y, m - 1, d, hh, mm);
+  const elapsedMinutes = (Date.now() - checkedInAt.getTime()) / 60_000;
+  if (elapsedMinutes < MAX_DAILY_WORK_MINUTES) return undefined;
+
+  const cappedAt = addMinutesToTime(checkInTime, MAX_DAILY_WORK_MINUTES);
+
+  const openEntry = await getGloballyActiveTimeEntry();
+  if (openEntry && openEntry.workDayId === active.id) {
+    await updateTimeEntry(openEntry.id, { endTime: cappedAt });
+  }
+
+  const closedDay = await checkOutWorkDay(active.id, cappedAt);
+  if (!closedDay) return undefined;
+  return { workDay: closedDay, cappedAt };
 }
 
 /**

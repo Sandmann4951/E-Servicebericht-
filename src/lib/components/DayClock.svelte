@@ -3,10 +3,19 @@
   import { getGloballyActiveTimeEntry, listTimeEntriesForDate } from '../db/timeEntries';
   import { getReport, listReports } from '../db/reports';
   import type { WorkDay, TimeEntry, ServiceReport } from '../db/types';
-  import { checkInDay, checkOutDay, switchToProject, startProjectByNumber, type DaySummary } from '../clockActions';
+  import {
+    autoCheckOutIfExceeded,
+    checkInDay,
+    checkOutDay,
+    switchToProject,
+    startProjectByNumber,
+    type AutoCheckOutResult,
+    type DaySummary
+  } from '../clockActions';
   import { getTechnicianName } from '../settings';
   import { navigate } from '../router.svelte';
-  import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
+  import { computeDurationMinutes, formatDateDE, formatDurationMinutes, nowHHmm } from '../utils/date';
+  import { exceedsMaxDailyWork } from '../utils/arbzg';
   import Icon from './Icon.svelte';
 
   /** Optional: informiert die Elternkomponente (ReportList), wenn sich der Eingecheckt-Status geändert haben könnte - z.B. für die Anpinnen/Hervorheben-Anzeige in der Berichtsliste. */
@@ -19,6 +28,8 @@
   let busy = $state(false);
   let quickClockInBusy = $state(false);
   let daySummary = $state<DaySummary | undefined>(undefined);
+  /** Gesetzt, wenn der Tag wegen Überschreitung der Höchstarbeitszeit automatisch ausgestempelt wurde (siehe checkAutoCheckOut()). */
+  let autoCheckOutWarning = $state<AutoCheckOutResult | undefined>(undefined);
 
   // Pausen-Panel beim Auschecken: statt sofort auszuchecken, fragt "Tag
   // ausstempeln" zuerst nach evtl. gemachten Pausen (siehe checkOutDay()-
@@ -52,8 +63,25 @@
     );
   });
 
+  /**
+   * Prüft auf Überschreitung der gesetzlichen Höchstarbeitszeit (§3 ArbZG)
+   * und stempelt in dem Fall automatisch aus (siehe
+   * clockActions.autoCheckOutIfExceeded()) - typisches Zeichen dafür, dass
+   * vergessen wurde, manuell auszustempeln. Setzt bei einem Treffer
+   * `autoCheckOutWarning`, damit die Vorlage einen entsprechenden
+   * Hinweis-Banner zeigen kann (bleibt stehen, bis der Nutzer ihn aktiv
+   * schließt - reine "Tag ausgestempelt"-Erfolgsmeldungen wie `daySummary`
+   * wären hier zu unauffällig für etwas, das der Nutzer nicht selbst
+   * ausgelöst hat).
+   */
+  async function checkAutoCheckOut(): Promise<void> {
+    const result = await autoCheckOutIfExceeded();
+    if (result) autoCheckOutWarning = result;
+  }
+
   async function load(): Promise<void> {
     loading = true;
+    await checkAutoCheckOut();
     workDay = await getActiveWorkDay();
     if (workDay) {
       activeEntry = await getGloballyActiveTimeEntry();
@@ -112,12 +140,23 @@
   // Bewusst an `workDay` statt `activeEntry` gekoppelt: solange der Tag
   // läuft, soll die "Heute bisher"-Kachel immer weiterlaufen - auch falls
   // (durch einen Bug an anderer Stelle) kurzzeitig kein offener Zeiteintrag
-  // vorhanden sein sollte, statt dann einzufrieren.
+  // vorhanden sein sollte, statt dann einzufrieren. Derselbe Tick prüft auch
+  // auf Überschreitung der Höchstarbeitszeit (checkAutoCheckOut()) - wird
+  // dabei automatisch ausgestempelt, ist `workDay` danach undefined, ein
+  // volles load() räumt dann Live-Anzeige/Auswahl-Panels korrekt auf statt
+  // nur die (jetzt nicht mehr zutreffende) Live-Summe weiterzurechnen.
   $effect(() => {
     if (!workDay) return;
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       tick += 1;
-      loadTodaySummary();
+      const before = autoCheckOutWarning;
+      await checkAutoCheckOut();
+      if (autoCheckOutWarning !== before) {
+        await load();
+        onChanged();
+      } else {
+        await loadTodaySummary();
+      }
     }, 30_000);
     return () => clearInterval(interval);
   });
@@ -178,6 +217,10 @@
 
   function dismissSummary(): void {
     daySummary = undefined;
+  }
+
+  function dismissAutoCheckOutWarning(): void {
+    autoCheckOutWarning = undefined;
   }
 
   /**
@@ -249,6 +292,21 @@
 
 {#if !loading}
   <div class="day-clock">
+    {#if autoCheckOutWarning}
+      <div class="auto-checkout-warning">
+        <p class="auto-checkout-warning-title"><Icon name="alert-triangle" size={16} />Automatisch ausgestempelt</p>
+        <p class="auto-checkout-warning-text">
+          Am {formatDateDE(autoCheckOutWarning.workDay.date)} wurde die gesetzliche Höchstarbeitszeit überschritten -
+          du wurdest deshalb automatisch um {autoCheckOutWarning.cappedAt} Uhr ausgestempelt. Falls das nur daran
+          lag, dass vergessen wurde, manuell auszustempeln: bitte die Zeiten (und ggf. Pausen) für diesen Tag in der
+          Auswertung prüfen und korrigieren.
+        </p>
+        <div class="auto-checkout-warning-actions">
+          <button type="button" class="review" onclick={() => navigate('/statistik')}>Zur Auswertung</button>
+          <button type="button" class="dismiss danger" onclick={dismissAutoCheckOutWarning}>Verstanden</button>
+        </div>
+      </div>
+    {/if}
     {#if daySummary}
       <div class="day-summary">
         <p class="day-summary-title"><Icon name="check-circle" size={16} />Tag ausgestempelt</p>
@@ -284,7 +342,12 @@
     {/if}
 
     {#if activeReport}
-      <button type="button" class="active-session" onclick={() => navigate(`/reports/${activeReport?.id}`)}>
+      <button
+        type="button"
+        class="active-session"
+        class:exceeds-max={exceedsMaxDailyWork(elapsedMinutes)}
+        onclick={() => navigate(`/reports/${activeReport?.id}`)}
+      >
         <span class="dot"></span>
         <span>
           Eingecheckt in „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
@@ -292,7 +355,7 @@
         </span>
       </button>
     {:else if activeEntry}
-      <div class="idle-badge">
+      <div class="idle-badge" class:exceeds-max={exceedsMaxDailyWork(elapsedMinutes)}>
         <span class="dot"></span>
         <span>
           Leerlaufzeit läuft seit {activeEntry.startTime}
@@ -482,6 +545,51 @@
     font-size: 0.8rem;
   }
 
+  .dismiss.danger {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+  }
+
+  .auto-checkout-warning {
+    background: var(--color-danger-bg);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .auto-checkout-warning-title {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    color: var(--color-danger);
+  }
+
+  .auto-checkout-warning-text {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--color-text);
+  }
+
+  .auto-checkout-warning-actions {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .review {
+    background: var(--color-danger);
+    color: var(--color-primary-contrast);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    min-height: auto;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+
   .active-session,
   .idle-badge {
     display: flex;
@@ -495,6 +603,17 @@
     font-weight: 600;
     font-size: 0.9rem;
     text-align: left;
+  }
+
+  .active-session.exceeds-max,
+  .idle-badge.exceeds-max {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+  }
+
+  .active-session.exceeds-max .dot,
+  .idle-badge.exceeds-max .dot {
+    background: var(--color-danger);
   }
 
   .active-session {

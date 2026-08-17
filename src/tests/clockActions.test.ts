@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from './testUtils';
 import {
   addManualBreak,
+  autoCheckOutIfExceeded,
   checkInDay,
   checkOutDay,
   reassignIdleEntry,
@@ -235,6 +236,100 @@ describe('checkOutDay', () => {
     const summary = await checkOutDay();
 
     expect(summary?.totalMinutes).toBe(20);
+  });
+});
+
+describe('autoCheckOutIfExceeded (automatisches Ausstempeln bei Überschreitung der Höchstarbeitszeit)', () => {
+  it('liefert undefined, wenn kein Tag aktiv ist', async () => {
+    expect(await autoCheckOutIfExceeded()).toBeUndefined();
+  });
+
+  it('liefert undefined, solange die Höchstarbeitszeit noch nicht erreicht ist', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T06:00:00'));
+      await checkInDay();
+
+      vi.setSystemTime(new Date('2026-08-10T14:00:00')); // 8 Std. später - noch unter der Grenze
+      const result = await autoCheckOutIfExceeded();
+
+      expect(result).toBeUndefined();
+      expect(await getActiveWorkDay()).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stempelt automatisch aus, sobald die Höchstarbeitszeit (10 Std.) erreicht ist, gekappt auf Einstempelzeit + 10 Std. statt auf "jetzt"', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T06:00:00'));
+      const day = await checkInDay();
+
+      vi.setSystemTime(new Date('2026-08-10T18:30:00')); // 12,5 Std. später - deutlich über der Grenze
+      const result = await autoCheckOutIfExceeded();
+
+      expect(result?.cappedAt).toBe('16:00'); // 06:00 + 10 Std., NICHT 18:30
+      expect(result?.workDay.checkOutTime).toBe('16:00');
+      expect(await getActiveWorkDay()).toBeUndefined();
+
+      const entries = await listTimeEntriesForWorkDay(day.id);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].endTime).toBe('16:00');
+      expect(entries[0].durationMinutes).toBe(600);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('erkennt auch ein über mehrere Kalendertage vergessenes Auschecken (echte Datums-Differenz statt nur "HH:mm"-Arithmetik)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T08:00:00'));
+      await checkInDay();
+
+      // App erst zwei Tage später wieder geöffnet.
+      vi.setSystemTime(new Date('2026-08-12T09:00:00'));
+      const result = await autoCheckOutIfExceeded();
+
+      expect(result?.cappedAt).toBe('18:00'); // 08:00 + 10 Std., unabhängig davon, wie viele Tage seither vergangen sind
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('schließt den gerade offenen Abschnitt (Projekt, nicht nur Leerlaufzeit) mit der gekappten Zeit ab', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T07:00:00'));
+      await checkInDay();
+      await switchToProject(report.id);
+
+      vi.setSystemTime(new Date('2026-08-10T20:00:00'));
+      await autoCheckOutIfExceeded();
+
+      const entries = await listTimeEntries(report.id);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].endTime).toBe('17:00'); // 07:00 + 10 Std.
+      expect(await getGloballyActiveTimeEntry()).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hat keinen Effekt, wenn der Tag bereits ausgestempelt ist', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T06:00:00'));
+      await checkInDay();
+      await checkOutDay();
+
+      vi.setSystemTime(new Date('2026-08-10T20:00:00'));
+      expect(await autoCheckOutIfExceeded()).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
