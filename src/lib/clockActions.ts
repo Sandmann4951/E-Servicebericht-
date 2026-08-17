@@ -42,29 +42,59 @@ export async function checkInDay(): Promise<WorkDay> {
 }
 
 /**
+ * Trägt eine Pause für ein beliebiges Zeitfenster ein - Kernstück sowohl von
+ * checkOutDay() (Pausen beim Tagesausstempeln) als auch der manuellen
+ * Nachtragung eines vergessenen/nachträglichen Pausenfensters in der
+ * Auswertung (Statistik.svelte, Tag-Ansicht). Schaut per
+ * findOverlappingTimeEntries() nach, welche bereits bestehenden Projekt-/
+ * Leerlaufzeit-Abschnitte an diesem Tag in diesem Fenster liegen, schneidet
+ * sie per trimOverlappingTimeEntries() heraus (gekürzt/gesplittet/komplett
+ * gelöscht - exakt dieselbe Logik wie bei manuell erfassten
+ * Überschneidungen) und legt einen eigenen, isBreak-markierten Eintrag für
+ * die Pause selbst an (Nachvollziehbarkeit/Lohnabrechnung, sichtbar in der
+ * Tages-Statistik) - der zählt nirgends als Arbeitszeit (siehe
+ * TimeEntry.isBreak). Die dabei anfallenden TimeEntryTrimRecords (Vorher-
+ * Zustand der weggeschnittenen Nachbar-Einträge) werden direkt am
+ * Pause-Eintrag gespeichert, damit timeEntries.restoreBreak() die Pause
+ * später bei Bedarf wieder rückgängig machen und die weggeschnittene Zeit
+ * automatisch gutschreiben kann.
+ *
+ * `workDayId` bewusst optional: beim Tagesausstempeln (checkOutDay()) wird
+ * der gerade beendete Tagesstempel mitgegeben (die Pause zählt dann zur
+ * Tagesbilanz dieses Stempels, siehe listTimeEntriesForDate()); beim
+ * manuellen Nachtragen für einen beliebigen (auch zurückliegenden) Tag
+ * über die Auswertung gibt es keinen zugehörigen Tagesstempel, dort bleibt
+ * es undefined - getDayStats()/getDayBreaks() lesen ohnehin direkt über
+ * das Datum, nicht über workDayId.
+ *
+ * Ohne Effekt, wenn `startTime`/`endTime` fehlen.
+ */
+export async function addManualBreak(date: string, startTime: string, endTime: string, workDayId?: ID): Promise<void> {
+  if (!startTime || !endTime) return;
+  const overlaps = await findOverlappingTimeEntries(date, startTime, endTime);
+  const trimRecords = await trimOverlappingTimeEntries(overlaps, startTime, endTime);
+  await addTimeEntry(undefined, {
+    date,
+    startTime,
+    endTime,
+    workDayId,
+    isBreak: true,
+    trimRecords
+  });
+}
+
+/**
  * Schließt den aktuell offenen Abschnitt (Leerlaufzeit oder Projekt),
- * schneidet optional erfasste Pausen heraus und beendet den Tagesstempel.
- * Gibt die Tageszusammenfassung zurück, oder `undefined`, wenn gerade gar
- * kein Tag läuft.
+ * schneidet optional erfasste Pausen heraus (siehe addManualBreak()) und
+ * beendet den Tagesstempel. Gibt die Tageszusammenfassung zurück, oder
+ * `undefined`, wenn gerade gar kein Tag läuft.
  *
  * `breaks`: Während einer Pause bleibt man laut Anleitung eingestempelt
  * (Projekt oder Leerlaufzeit läuft einfach weiter) statt extra
  * auszuchecken - beim Tagesausstempeln werden die tatsächlichen
- * Pausenzeiten nachträglich angegeben. Für jede Pause wird zuerst per
- * findOverlappingTimeEntries() geschaut, welche bereits bestehenden
- * Projekt-/Leerlaufzeit-Abschnitte in diesem Fenster liegen (der gerade
- * geschlossene Abschnitt zählt dabei schon mit, da er oben bereits eine
- * endTime bekommen hat), diese werden per trimOverlappingTimeEntries()
- * gekürzt/gesplittet (exakt dieselbe Logik wie bei manuell erfassten
- * Überschneidungen) - die Pausenzeit fließt dadurch weder ins Projekt noch
- * in die Leerlaufzeit ein. Zusätzlich entsteht ein eigener, isBreak-
- * markierter Eintrag für die Pause selbst (Nachvollziehbarkeit/
- * Lohnabrechnung, sichtbar in der Tages-Statistik) - der zählt nirgends
- * als Arbeitszeit (siehe TimeEntry.isBreak). Die dabei anfallenden
- * TimeEntryTrimRecords (Vorher-Zustand der weggeschnittenen Nachbar-
- * Einträge) werden direkt am Pause-Eintrag gespeichert, damit
- * timeEntries.restoreBreak() die Pause später bei Bedarf wieder rückgängig
- * machen und die weggeschnittene Zeit automatisch gutschreiben kann.
+ * Pausenzeiten nachträglich angegeben (der gerade geschlossene Abschnitt
+ * zählt für die Überschneidungssuche schon mit, da er oben bereits eine
+ * endTime bekommen hat).
  *
  * Die Zusammenfassung umfasst bewusst den GANZEN Kalendertag (`active.date`),
  * nicht nur diesen einen WorkDay-Datensatz: wurde am selben Tag bereits
@@ -83,17 +113,7 @@ export async function checkOutDay(breaks: BreakInput[] = []): Promise<DaySummary
   }
 
   for (const brk of breaks) {
-    if (!brk.startTime || !brk.endTime) continue;
-    const overlaps = await findOverlappingTimeEntries(active.date, brk.startTime, brk.endTime);
-    const trimRecords = await trimOverlappingTimeEntries(overlaps, brk.startTime, brk.endTime);
-    await addTimeEntry(undefined, {
-      date: active.date,
-      startTime: brk.startTime,
-      endTime: brk.endTime,
-      workDayId: active.id,
-      isBreak: true,
-      trimRecords
-    });
+    await addManualBreak(active.date, brk.startTime, brk.endTime, active.id);
   }
 
   const closedDay = await checkOutWorkDay(active.id);

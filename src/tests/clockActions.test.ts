@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from './testUtils';
 import {
+  addManualBreak,
   checkInDay,
   checkOutDay,
   reassignIdleEntry,
@@ -20,6 +21,7 @@ import {
   updateTimeEntry
 } from '../lib/db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from '../lib/db/workDays';
+import { getDayBreaks } from '../lib/db/stats';
 import { todayISODate } from '../lib/utils/date';
 
 beforeEach(async () => {
@@ -413,6 +415,60 @@ describe('restoreBreak (Pause rückgängig machen)', () => {
     await restoreBreak(entry.id);
 
     expect(await listTimeEntries(report.id)).toHaveLength(1);
+  });
+});
+
+describe('addManualBreak (manuelles Nachtragen einer Pause, z.B. in der Auswertung)', () => {
+  it('schneidet eine Pause aus einem bestehenden Eintrag an einem beliebigen Tag heraus, ganz ohne aktiven Tagesstempel', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await addManualBreak('2026-08-10', '12:00', '12:30');
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(2);
+    const total = entries.reduce((sum, e) => sum + (e.durationMinutes ?? 0), 0);
+    expect(total).toBe(450); // 480 Minuten abzüglich 30 Minuten Pause
+
+    const breaks = await getDayBreaks('2026-08-10');
+    expect(breaks).toHaveLength(1);
+    expect(breaks[0].minutes).toBe(30);
+  });
+
+  it('legt den Pause-Eintrag ohne workDayId an, wenn keins übergeben wird - trotzdem über das Datum auffindbar', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await addManualBreak('2026-08-10', '12:00', '12:30');
+
+    const breaks = await getDayBreaks('2026-08-10');
+    expect(breaks).toHaveLength(1);
+  });
+
+  it('kann per restoreBreak() wieder rückgängig gemacht werden - trimRecords werden auch beim manuellen Pfad korrekt gefüllt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await addManualBreak('2026-08-10', '12:00', '12:30');
+    const breakEntry = (await getDayBreaks('2026-08-10'))[0];
+
+    await restoreBreak(breakEntry.id);
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].startTime).toBe('08:00');
+    expect(entries[0].endTime).toBe('16:00');
+    expect(await getDayBreaks('2026-08-10')).toEqual([]);
+  });
+
+  it('hat keinen Effekt, wenn Start- oder Endzeit fehlt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await addManualBreak('2026-08-10', '', '12:30');
+    await addManualBreak('2026-08-10', '12:00', '');
+
+    expect(await listTimeEntries(report.id)).toHaveLength(1);
+    expect(await getDayBreaks('2026-08-10')).toEqual([]);
   });
 });
 

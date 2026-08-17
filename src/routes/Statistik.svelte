@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getDayBreaks, getDayProjectBreakdown, getDayStats, type DayBreak, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
   import { restoreBreak } from '../lib/db/timeEntries';
+  import { addManualBreak } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
   import type { Absence, AbsenceType } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -76,6 +77,13 @@
   let view = $state<View>('monat');
   let projectBreakdown = $state<DayProjectBreakdown[]>([]);
   let dayBreaks = $state<DayBreak[]>([]);
+  // Formular zum nachträglichen Eintragen einer Pause für den in der
+  // Tag-Ansicht gewählten Tag (unabhängig vom Tagesausstempeln - z.B. für
+  // eine vergessene Pause oder einen zurückliegenden Tag).
+  let addBreakFormOpen = $state(false);
+  let addBreakStart = $state('');
+  let addBreakEnd = $state('');
+  let addingBreak = $state(false);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -131,6 +139,36 @@
     await restoreBreak(breakId);
     dayBreaks = await getDayBreaks(selectedDate);
     await load();
+  }
+
+  function openAddBreakForm(): void {
+    addBreakStart = '';
+    addBreakEnd = '';
+    addBreakFormOpen = true;
+  }
+
+  function closeAddBreakForm(): void {
+    addBreakFormOpen = false;
+  }
+
+  /**
+   * Trägt eine Pause manuell nach - unabhängig vom Tagesausstempeln, für
+   * einen beliebigen (auch zurückliegenden) Tag. Nutzt dieselbe Carve-out-
+   * Logik wie beim Auschecken (addManualBreak() in clockActions.ts): die
+   * Pausenzeit wird aus überschneidenden Projekt-/Leerlaufzeit-Einträgen
+   * dieses Tages herausgeschnitten.
+   */
+  async function submitAddBreak(): Promise<void> {
+    if (!addBreakStart || !addBreakEnd || addingBreak) return;
+    addingBreak = true;
+    try {
+      await addManualBreak(selectedDate, addBreakStart, addBreakEnd);
+      addBreakFormOpen = false;
+      dayBreaks = await getDayBreaks(selectedDate);
+      await load();
+    } finally {
+      addingBreak = false;
+    }
   }
 
   // Soll-Stunden nur nachladen, solange die Monatsansicht aktiv ist -
@@ -456,9 +494,9 @@
         {/if}
       {/if}
 
-      {#if dayBreaks.length > 0}
-        <div class="projects">
-          <p class="section-title">Pausen</p>
+      <div class="projects">
+        <p class="section-title">Pausen</p>
+        {#if dayBreaks.length > 0}
           <ul class="breakdown">
             {#each dayBreaks as brk (brk.id)}
               <li class="break-entry">
@@ -470,8 +508,24 @@
               </li>
             {/each}
           </ul>
-        </div>
-      {/if}
+        {/if}
+
+        {#if addBreakFormOpen}
+          <div class="add-break-form">
+            <div class="break-row">
+              <input type="time" bind:value={addBreakStart} aria-label="Pause von" />
+              <span>–</span>
+              <input type="time" bind:value={addBreakEnd} aria-label="Pause bis" />
+            </div>
+            <div class="add-break-actions">
+              <button type="button" class="cancel" onclick={closeAddBreakForm}>Abbrechen</button>
+              <button type="button" class="primary" onclick={submitAddBreak} disabled={addingBreak}>Speichern</button>
+            </div>
+          </div>
+        {:else}
+          <button type="button" class="add-break-toggle" onclick={openAddBreakForm}>+ Pause hinzufügen</button>
+        {/if}
+      </div>
     {:else if view === 'monat'}
       <div class="nav">
         <button
@@ -984,6 +1038,66 @@
     color: var(--color-danger);
     padding: 0 0 0 var(--space-2);
     min-height: auto;
+  }
+
+  .add-break-toggle {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--color-primary);
+    color: var(--color-primary);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    min-height: auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .add-break-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+  }
+
+  .break-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .break-row input {
+    flex: 1;
+  }
+
+  .break-row span {
+    color: var(--color-text-muted);
+  }
+
+  .add-break-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  .add-break-actions .cancel {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    min-height: auto;
+  }
+
+  .add-break-actions .primary {
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    min-height: auto;
+    font-weight: 600;
   }
 
   .breakdown-label {
