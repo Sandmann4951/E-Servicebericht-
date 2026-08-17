@@ -3,10 +3,11 @@
   import { restoreBreak } from '../lib/db/timeEntries';
   import { addManualBreak } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
-  import type { Absence, AbsenceType } from '../lib/db/types';
+  import type { Absence, AbsenceType, ID } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
+  import { SvelteSet } from 'svelte/reactivity';
   import { computeDayStatus, type DayStatus } from '../lib/utils/calendarDay';
   import { getGermanHolidays } from '../lib/utils/holidays';
   import { getBundesland } from '../lib/settings';
@@ -98,6 +99,13 @@
   // wieder zu.
   let selectedCalendarDate = $state<string | undefined>(undefined);
   let calendarDayBreakdown = $state<DayProjectBreakdown[]>([]);
+  // Welche Projekt-Zeilen der Projekt-Aufschlüsselung gerade aufgeklappt sind
+  // (zeigt dann die einzelnen gestempelten Zeitabschnitte statt nur der
+  // Summe) - getrennt für Tag-Ansicht und Kalender-Tagespanel, da beide
+  // gleichzeitig offen sein können (Kalender → "Vollständige Tagesansicht
+  // öffnen" wechselt in die Tag-Ansicht, ohne das Kalender-Panel zu schließen).
+  const expandedProjects = new SvelteSet<ID>();
+  const expandedCalendarProjects = new SvelteSet<ID>();
 
   const today = todayISODate();
   let selectedDate = $state(today);
@@ -403,6 +411,15 @@
     return cells.find((cell) => cell?.date === selectedCalendarDate) ?? undefined;
   });
 
+  /** Klappt die gestempelten Einzelzeiten eines Projekts in einer Projekt-Aufschlüsselung auf/zu. */
+  function toggleProjectExpanded(set: Set<ID>, reportId: ID): void {
+    if (set.has(reportId)) {
+      set.delete(reportId);
+    } else {
+      set.add(reportId);
+    }
+  }
+
   function openDay(date: string): void {
     selectedDate = date;
     view = 'tag';
@@ -474,20 +491,7 @@
         {#if projectBreakdown.length > 0}
           <div class="projects">
             <p class="section-title">Projekte an diesem Tag</p>
-            <ul class="breakdown">
-              {#each projectBreakdown as project (project.reportId)}
-                <li>
-                  <button type="button" class="breakdown-row" onclick={() => navigate(`/reports/${project.reportId}`)}>
-                    <span class="breakdown-label plain">
-                      {project.projectNumber}{#if project.customer} · {project.customer}{/if}
-                    </span>
-                    <span class="breakdown-values">
-                      <span class="productive">{formatDurationMinutes(project.minutes)}</span>
-                    </span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
+            {@render projectBreakdownSnippet(projectBreakdown, expandedProjects)}
           </div>
         {:else if dayStat.productiveMinutes === 0}
           <p class="hint">Nur Leerlaufzeit an diesem Tag, keine Projektzeiten.</p>
@@ -707,20 +711,7 @@
           {#if selectedCalendarDayStat.totalMinutes > 0}
             {@render statsCardSnippet(selectedCalendarDayStat)}
             {#if calendarDayBreakdown.length > 0}
-              <ul class="breakdown">
-                {#each calendarDayBreakdown as project (project.reportId)}
-                  <li>
-                    <button type="button" class="breakdown-row" onclick={() => navigate(`/reports/${project.reportId}`)}>
-                      <span class="breakdown-label plain">
-                        {project.projectNumber}{#if project.customer} · {project.customer}{/if}
-                      </span>
-                      <span class="breakdown-values">
-                        <span class="productive">{formatDurationMinutes(project.minutes)}</span>
-                      </span>
-                    </button>
-                  </li>
-                {/each}
-              </ul>
+              {@render projectBreakdownSnippet(calendarDayBreakdown, expandedCalendarProjects)}
             {/if}
             <button type="button" class="day-panel-link" onclick={() => openDay(date)}>Vollständige Tagesansicht öffnen</button>
           {:else if cell?.status === 'holiday'}
@@ -805,6 +796,46 @@
     </div>
     <p class="split-caption">{productivePercent(stats)}% produktiv</p>
   </div>
+{/snippet}
+
+{#snippet projectBreakdownSnippet(breakdown: DayProjectBreakdown[], expanded: Set<ID>)}
+  <ul class="breakdown">
+    {#each breakdown as project (project.reportId)}
+      {@const isExpanded = expanded.has(project.reportId)}
+      <li>
+        <div class="breakdown-item">
+          <button type="button" class="breakdown-row" onclick={() => navigate(`/reports/${project.reportId}`)}>
+            <span class="breakdown-label plain">
+              {project.projectNumber}{#if project.customer} · {project.customer}{/if}
+            </span>
+            <span class="breakdown-values">
+              <span class="productive">{formatDurationMinutes(project.minutes)}</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="breakdown-expand"
+            class:expanded={isExpanded}
+            onclick={() => toggleProjectExpanded(expanded, project.reportId)}
+            aria-expanded={isExpanded}
+            aria-label="{isExpanded ? 'Gestempelte Zeiten einklappen' : 'Gestempelte Zeiten anzeigen'} für {project.projectNumber}"
+          >
+            <Icon name="chevron-down" size={16} />
+          </button>
+        </div>
+        {#if isExpanded}
+          <ul class="entry-list">
+            {#each project.entries as entry (entry.id)}
+              <li class="entry-row">
+                <span>{entry.startTime ?? '?'}–{entry.endTime ?? '?'} Uhr</span>
+                <span class="productive">{formatDurationMinutes(entry.minutes)}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </li>
+    {/each}
+  </ul>
 {/snippet}
 
 <style>
@@ -1007,6 +1038,12 @@
     gap: var(--space-2);
   }
 
+  .breakdown > li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
   .breakdown-row {
     width: 100%;
     display: flex;
@@ -1019,6 +1056,59 @@
     padding: var(--space-3);
     text-align: left;
     min-height: auto;
+  }
+
+  .breakdown-item {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .breakdown-item .breakdown-row {
+    flex: 1;
+  }
+
+  .breakdown-expand {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    min-height: auto;
+    transition: transform 0.15s ease;
+  }
+
+  .breakdown-expand.expanded {
+    transform: rotate(180deg);
+  }
+
+  .entry-list {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-md);
+  }
+
+  .entry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+  }
+
+  .entry-row .productive {
+    color: var(--color-completed);
+    font-weight: 600;
   }
 
   .break-entry {

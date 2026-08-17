@@ -46,37 +46,55 @@ export async function getDayStats(): Promise<DayStats[]> {
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** Ein einzelner gestempelter/erfasster Zeitabschnitt innerhalb eines DayProjectBreakdown-Eintrags. */
+export interface DayProjectEntry {
+  id: ID;
+  startTime?: string;
+  endTime?: string;
+  minutes: number;
+}
+
 export interface DayProjectBreakdown {
   reportId: ID;
   projectNumber: string;
   customer?: string;
   minutes: number;
+  /** Die einzelnen Zeiteinträge, aus denen sich `minutes` zusammensetzt - nach Startzeit sortiert. */
+  entries: DayProjectEntry[];
 }
 
 /**
  * Liefert für einen einzelnen Tag, an welchen Berichten wie lange gearbeitet
  * wurde (nur produktive, einem Bericht zugeordnete Zeit - Leerlaufzeit hat
  * keinen Bericht) - Grundlage für die Projekt-Aufschlüsselung in der
- * Statistik-Tagesansicht. Absteigend nach investierter Zeit sortiert.
+ * Statistik-Tagesansicht. Absteigend nach investierter Zeit sortiert. Enthält
+ * pro Bericht zusätzlich die einzelnen gestempelten Zeitabschnitte
+ * (`entries`), damit die UI sie bei Bedarf ausklappen kann, statt nur die
+ * Gesamtsumme zu zeigen - bei mehreren kurzen Ein-/Auschecks am selben Tag
+ * im selben Projekt ist die Summe allein sonst wenig aussagekräftig.
  */
 export async function getDayProjectBreakdown(date: ISODate): Promise<DayProjectBreakdown[]> {
   const db = await getDB();
   const entries = await db.getAllFromIndex('timeEntries', 'date', date);
 
-  const minutesByReport = new Map<ID, number>();
+  const entriesByReport = new Map<ID, DayProjectEntry[]>();
   for (const entry of entries) {
     if (!entry.reportId || !entry.durationMinutes) continue;
-    minutesByReport.set(entry.reportId, (minutesByReport.get(entry.reportId) ?? 0) + entry.durationMinutes);
+    const list = entriesByReport.get(entry.reportId) ?? [];
+    list.push({ id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes });
+    entriesByReport.set(entry.reportId, list);
   }
 
   const breakdown = await Promise.all(
-    Array.from(minutesByReport.entries()).map(async ([reportId, minutes]) => {
+    Array.from(entriesByReport.entries()).map(async ([reportId, reportEntries]) => {
       const report = await db.get('reports', reportId);
+      reportEntries.sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
       return {
         reportId,
         projectNumber: report?.projectNumber ?? 'Unbekannter Bericht',
         customer: report?.customer,
-        minutes
+        minutes: reportEntries.reduce((sum, e) => sum + e.minutes, 0),
+        entries: reportEntries
       };
     })
   );

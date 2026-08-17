@@ -108,14 +108,20 @@ describe('getDayProjectBreakdown', () => {
     expect(await getDayProjectBreakdown('2026-08-10')).toEqual([]);
   });
 
-  it('summiert mehrere Abschnitte im selben Bericht am selben Tag', async () => {
+  it('summiert mehrere Abschnitte im selben Bericht am selben Tag und liefert die Einzelabschnitte sortiert mit', async () => {
     const report = await createReport({ projectNumber: 'A', customer: 'Müller GmbH' });
-    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' }); // 120
-    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '13:00', endTime: '14:30' }); // 90
+    const second = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '13:00', endTime: '14:30' }); // 90, absichtlich zuerst angelegt
+    const first = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' }); // 120
 
     const breakdown = await getDayProjectBreakdown('2026-08-10');
 
-    expect(breakdown).toEqual([{ reportId: report.id, projectNumber: 'A', customer: 'Müller GmbH', minutes: 210 }]);
+    expect(breakdown).toHaveLength(1);
+    expect(breakdown[0]).toMatchObject({ reportId: report.id, projectNumber: 'A', customer: 'Müller GmbH', minutes: 210 });
+    // Nach Startzeit sortiert, unabhängig von der Anlage-Reihenfolge.
+    expect(breakdown[0].entries).toEqual([
+      { id: first.id, startTime: '08:00', endTime: '10:00', minutes: 120 },
+      { id: second.id, startTime: '13:00', endTime: '14:30', minutes: 90 }
+    ]);
   });
 
   it('listet mehrere Berichte am selben Tag, absteigend nach Zeit sortiert', async () => {
