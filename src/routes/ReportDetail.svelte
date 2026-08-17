@@ -94,6 +94,10 @@
   let savedPulseVisible = $state(false);
   let savedPulseTimeout: ReturnType<typeof setTimeout> | undefined;
   let projectNumberMissing = $state(false);
+  // Verhindert, dass die Duplikat-Rückfrage (siehe checkForDuplicateProjectNumber()
+  // unten) für denselben Entwurf mehrfach erscheint, nachdem der Nutzer sich
+  // schon einmal bewusst für "trotzdem neuen Bericht anlegen" entschieden hat.
+  let duplicateWarningDismissed = false;
   let exporting = $state(false);
   let exportError = $state(false);
 
@@ -106,35 +110,6 @@
   async function persistNow(): Promise<void> {
     if (!reportId) {
       if (!projectNumber.trim()) return;
-      const trimmed = projectNumber.trim();
-
-      // Bevor tatsächlich ein neuer Bericht angelegt wird: prüfen, ob es zu
-      // dieser Projektnummer bereits einen offenen (nicht gesperrten)
-      // Bericht gibt - man tippt schnell mal aus Versehen dieselbe Nummer
-      // erneut ein (z.B. wenn "+ Neuer Bericht" statt der bestehenden Karte
-      // in der Übersicht angetippt wurde), statt im bereits laufenden
-      // Bericht weiterzuarbeiten. Dieselbe "offen" = "nicht finalizedAt"-
-      // Definition wie bei startProjectByNumber() (Direkt-einchecken-Flow) -
-      // dort wird ein solcher Bericht automatisch wiederverwendet; hier,
-      // beim bewussten manuellen Anlegen über "+ Neuer Bericht", fragt die
-      // App stattdessen aktiv nach, weil der Nutzer hier ausdrücklich einen
-      // Bericht angelegt hat und die Wiederverwendung nicht überraschend
-      // "unterjubeln" soll.
-      const openExisting = (await listReportsByProjectNumber(trimmed)).find((r) => !r.finalizedAt);
-      if (openExisting) {
-        const label = openExisting.projectDescription
-          ? `${openExisting.projectNumber} – ${openExisting.projectDescription}`
-          : openExisting.projectNumber;
-        const customerHint = openExisting.customer ? ` (Kunde: ${openExisting.customer})` : '';
-        const wantsExisting = confirm(
-          `Für Projekt "${label}"${customerHint} existiert bereits ein offener Bericht.\n\nOK = im bestehenden Bericht weiterarbeiten\nAbbrechen = trotzdem einen neuen Bericht anlegen`
-        );
-        if (wantsExisting) {
-          navigate(`/reports/${openExisting.id}`, { replace: true });
-          return;
-        }
-      }
-
       const created = await createReport({
         projectNumber,
         projectDescription: projectDescription || undefined,
@@ -199,6 +174,69 @@
 
   function flushNow(): void {
     scheduledSave.flush();
+  }
+
+  /**
+   * Prüft beim Verlassen des Projektnummer-Feldes (onblur), ob zu dieser
+   * Nummer bereits ein ANDERER offener (nicht gesperrter) Bericht existiert -
+   * und zwar bewusst NICHT als Teil von persistNow() selbst, sondern erst
+   * hier, wo die Nummer garantiert vollständig eingetippt ist. Grund: Die
+   * zeichenweise Autosave-Debounce (450ms Tipp-Pause, siehe scheduledSave)
+   * kann während des Tippens jederzeit mit einer noch UNVOLLSTÄNDIGEN
+   * Nummer feuern (z.B. bei einer kurzen Denkpause zwischen "2026-" und
+   * "0142") und dabei bereits über persistNow() einen Bericht anlegen -
+   * eine Duplikat-Prüfung direkt in persistNow() würde dann mit der
+   * unvollständigen Nummer laufen, keinen Treffer finden, und da reportId
+   * ab da gesetzt ist, nie wieder erneut geprüft (jeder weitere
+   * persistNow()-Aufruf landet nur noch im Update-Zweig). Deshalb: erst
+   * hier, mit der endgültigen Nummer, und ausdrücklich unter Ausschluss des
+   * eigenen (ggf. gerade erst durch genau so eine verfrühte Debounce-Runde
+   * entstandenen) Berichts.
+   *
+   * Nur relevant beim erstmaligen Anlegen (isNewRoute) - beim Bearbeiten
+   * eines bereits bestehenden Berichts wird nicht geprüft, um dort niemals
+   * versehentlich den gerade bearbeiteten Bericht zur Löschung anzubieten.
+   */
+  async function checkForDuplicateProjectNumber(): Promise<void> {
+    flushNow();
+    await saveChain;
+    if (!isNewRoute || duplicateWarningDismissed || locked) return;
+    const trimmed = projectNumber.trim();
+    if (!trimmed) return;
+
+    const openExisting = (await listReportsByProjectNumber(trimmed)).find(
+      (r) => !r.finalizedAt && r.id !== reportId
+    );
+    if (!openExisting) return;
+
+    const label = openExisting.projectDescription
+      ? `${openExisting.projectNumber} – ${openExisting.projectDescription}`
+      : openExisting.projectNumber;
+    const customerHint = openExisting.customer ? ` (Kunde: ${openExisting.customer})` : '';
+    const wantsExisting = confirm(
+      `Für Projekt "${label}"${customerHint} existiert bereits ein offener Bericht.\n\nOK = im bestehenden Bericht weiterarbeiten\nAbbrechen = trotzdem einen neuen Bericht anlegen`
+    );
+
+    if (wantsExisting) {
+      // Ein evtl. durch eine verfrühte Debounce-Runde bereits für DIESEN
+      // Entwurf angelegter (und damit brandneuer, praktisch leerer) Bericht
+      // wird beim Wechsel gleich mit aufgeräumt, statt als stille Leiche in
+      // der Übersicht liegen zu bleiben.
+      if (reportId) await deleteReport(reportId);
+      navigate(`/reports/${openExisting.id}`, { replace: true });
+      return;
+    }
+
+    duplicateWarningDismissed = true;
+    // Nutzerwunsch: beim bewussten Anlegen eines weiteren Berichts zum
+    // selben Projekt gleich die Basisdaten aus dem bestehenden Bericht
+    // übernehmen, statt sie erneut eintippen zu müssen - bleiben dabei ganz
+    // normal weiter editierbar. Bereits selbst eingetippte Werte werden
+    // nicht überschrieben.
+    if (!projectDescription && openExisting.projectDescription) projectDescription = openExisting.projectDescription;
+    if (!customer && openExisting.customer) customer = openExisting.customer;
+    if (!contactPerson && openExisting.contactPerson) contactPerson = openExisting.contactPerson;
+    onFieldChange();
   }
 
   /**
@@ -547,7 +585,7 @@
             type="text"
             bind:value={projectNumber}
             oninput={onFieldChange}
-            onblur={flushNow}
+            onblur={checkForDuplicateProjectNumber}
             placeholder="z.B. 2026-0142"
             required
             disabled={locked}
