@@ -12,16 +12,17 @@
   } from '../lib/db/reports';
   import { getActiveTimeEntry } from '../lib/db/timeEntries';
   import { switchToIdle } from '../lib/clockActions';
-  import type { ReportStatus } from '../lib/db/types';
+  import type { ReportStatus, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
-  import { formatDurationMinutes } from '../lib/utils/date';
+  import { formatDateTimeDE, formatDurationMinutes } from '../lib/utils/date';
   import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
   import MaterialSection from '../lib/components/MaterialSection.svelte';
   import PhotoSection from '../lib/components/PhotoSection.svelte';
   import SignatureSection from '../lib/components/SignatureSection.svelte';
+  import StatusBadge from '../lib/components/StatusBadge.svelte';
   import Icon from '../lib/components/Icon.svelte';
 
   let { id }: { id: string } = $props();
@@ -57,14 +58,23 @@
   let finalizedAt = $state<string | undefined>(undefined);
 
   /**
-   * Gibt an, der wievielte Bericht dieser unter allen Berichten mit derselben
-   * Projektnummer ist (z.B. wiederkehrender Kunde/Standort) - `undefined`,
-   * wenn es der einzige ist. Wird einmalig beim Laden anhand der zu diesem
-   * Zeitpunkt gespeicherten Projektnummer ermittelt (siehe Lade-Effekt unten);
-   * ändert sich die Projektnummer danach, bleibt die Anzeige bis zum nächsten
-   * Neuladen auf dem alten Stand - für eine reine Info-Anzeige unkritisch.
+   * Alle Berichte mit derselben Projektnummer wie dieser (chronologisch,
+   * ältester zuerst - siehe listReportsByProjectNumber()), inkl. diesem
+   * Bericht selbst. Einmalig beim Laden anhand der zu diesem Zeitpunkt
+   * gespeicherten Projektnummer ermittelt (siehe Lade-Effekt unten); ändert
+   * sich die Projektnummer danach, bleibt die Liste bis zum nächsten
+   * Neuladen auf dem alten Stand - für eine reine Info-/Sprung-Anzeige
+   * unkritisch. Grundlage sowohl für den "X. von Y Berichten"-Badge als auch
+   * für die Liste der "verknüpften" Berichte zum direkten Hinspringen.
    */
-  let projectVisitInfo = $state<{ index: number; total: number } | undefined>(undefined);
+  let relatedReports = $state<ServiceReport[]>([]);
+  let relatedReportsOpen = $state(false);
+
+  const projectVisitInfo = $derived.by(() => {
+    if (relatedReports.length <= 1 || !reportId) return undefined;
+    const index = relatedReports.findIndex((r) => r.id === reportId);
+    return index === -1 ? undefined : { index: index + 1, total: relatedReports.length };
+  });
 
   // Ein final abgeschlossener Bericht darf nicht mehr verändert werden - die
   // Sperre hängt an `finalizedAt`, das sowohl beim Unterschreiben als auch
@@ -207,11 +217,7 @@
 
       listReportsByProjectNumber(report.projectNumber).then((related) => {
         if (cancelled) return;
-        if (related.length > 1) {
-          projectVisitInfo = { index: related.findIndex((r) => r.id === report.id) + 1, total: related.length };
-        } else {
-          projectVisitInfo = undefined;
-        }
+        relatedReports = related;
       });
     });
     return () => {
@@ -454,21 +460,55 @@
         </div>
       {/if}
       {#if reportId}
-        <button
-          type="button"
-          class="fields-toggle"
-          onclick={() => (fieldsExpanded = !fieldsExpanded)}
-          aria-expanded={fieldsExpanded}
-        >
-          <span class="fields-toggle-text">
-            <strong>{projectNumber || 'Ohne Projektnummer'}</strong>
-            {#if customer}<span class="fields-toggle-customer"> · {customer}</span>{/if}
-            {#if projectVisitInfo}
-              <span class="visit-badge">{projectVisitInfo.index}. von {projectVisitInfo.total} Berichten</span>
-            {/if}
-          </span>
-          <span class="chevron" class:open={fieldsExpanded}><Icon name="chevron-down" size={16} /></span>
-        </button>
+        <div class="header-row">
+          <button
+            type="button"
+            class="fields-toggle"
+            onclick={() => (fieldsExpanded = !fieldsExpanded)}
+            aria-expanded={fieldsExpanded}
+          >
+            <span class="fields-toggle-text">
+              <strong>{projectNumber || 'Ohne Projektnummer'}</strong>
+              {#if customer}<span class="fields-toggle-customer"> · {customer}</span>{/if}
+            </span>
+            <span class="chevron" class:open={fieldsExpanded}><Icon name="chevron-down" size={16} /></span>
+          </button>
+          {#if projectVisitInfo}
+            <button
+              type="button"
+              class="visit-badge"
+              class:open={relatedReportsOpen}
+              onclick={() => (relatedReportsOpen = !relatedReportsOpen)}
+              aria-expanded={relatedReportsOpen}
+              aria-label="{relatedReportsOpen ? 'Verknüpfte Berichte einklappen' : 'Verknüpfte Berichte anzeigen'} ({projectVisitInfo.index}. von {projectVisitInfo.total})"
+            >
+              {projectVisitInfo.index}. von {projectVisitInfo.total}
+              <Icon name="chevron-down" size={12} />
+            </button>
+          {/if}
+        </div>
+        {#if relatedReportsOpen && projectVisitInfo}
+          <ul class="related-reports">
+            {#each relatedReports as related, i (related.id)}
+              {@const isCurrent = related.id === reportId}
+              <li>
+                <button
+                  type="button"
+                  class="related-report-row"
+                  class:current={isCurrent}
+                  disabled={isCurrent}
+                  onclick={() => navigate(`/reports/${related.id}`)}
+                >
+                  <span class="related-report-label">
+                    {i + 1}. Bericht · {formatDateTimeDE(related.createdAt)}
+                    {#if isCurrent}<span class="related-report-current-tag">(aktuell geöffnet)</span>{/if}
+                  </span>
+                  <StatusBadge status={related.status} signed={!!related.signedAt} locked={!!related.finalizedAt} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
       {#if !reportId || fieldsExpanded}
       <div class="fields">
@@ -757,15 +797,23 @@
     font-size: 0.8rem;
   }
 
+  .header-row {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-2);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+  }
+
   .fields-toggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    width: 100%;
-    background: var(--color-surface);
+    flex: 1;
+    min-width: 0;
+    background: transparent;
     border: none;
-    border-bottom: 1px solid var(--color-border);
     padding: var(--space-4);
     text-align: left;
     min-height: auto;
@@ -783,13 +831,28 @@
   }
 
   .visit-badge {
-    margin-left: var(--space-2);
-    padding: 2px var(--space-2);
+    display: flex;
+    align-items: center;
+    align-self: center;
+    flex-shrink: 0;
+    gap: 3px;
+    margin-right: var(--space-3);
+    padding: 3px var(--space-2);
+    border: none;
     border-radius: 999px;
     background: var(--color-surface-muted);
     color: var(--color-text-muted);
     font-size: 0.7rem;
     font-weight: 600;
+    min-height: auto;
+  }
+
+  .visit-badge :global(svg) {
+    transition: transform 0.15s ease;
+  }
+
+  .visit-badge.open :global(svg) {
+    transform: rotate(180deg);
   }
 
   .chevron {
@@ -800,6 +863,47 @@
 
   .chevron.open {
     transform: rotate(180deg);
+  }
+
+  .related-reports {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .related-report-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    text-align: left;
+    min-height: auto;
+    font-size: 0.85rem;
+  }
+
+  .related-report-row.current {
+    border-color: var(--color-primary);
+    opacity: 0.7;
+  }
+
+  .related-report-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .related-report-current-tag {
+    color: var(--color-text-muted);
+    font-weight: 400;
   }
 
   .fields {
