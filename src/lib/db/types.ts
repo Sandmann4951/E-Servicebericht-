@@ -82,8 +82,37 @@ export interface TimeEntry {
    * Einträge ohne dieses Feld gelten automatisch als "keine Pause".
    */
   isBreak?: boolean;
+  /**
+   * Nur bei isBreak-Einträgen gesetzt: dokumentiert, welche Nachbar-Einträge
+   * beim Anlegen dieser Pause gekürzt/gesplittet/gelöscht wurden (siehe
+   * timeEntries.trimOverlappingTimeEntries()) - Grundlage für
+   * restoreBreak(), das diese Änderungen beim Löschen der Pause wieder
+   * rückgängig macht.
+   */
+  trimRecords?: TimeEntryTrimRecord[];
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+}
+
+/**
+ * Der "Vorher"-Zustand eines einzelnen Nachbar-Eintrags, der beim Anlegen
+ * einer Pause weggeschnitten wurde - reicht aus, um trimOverlappingTimeEntries()
+ * für genau diesen Eintrag wieder rückgängig zu machen (siehe
+ * timeEntries.restoreBreak()).
+ */
+export interface TimeEntryTrimRecord {
+  /** ID des ursprünglichen Eintrags (bleibt auch nach dem Wegschneiden gültig, außer bei wasDeleted). */
+  entryId: ID;
+  reportId?: ID;
+  workDayId?: ID;
+  date: ISODate;
+  originalStartTime?: string;
+  originalEndTime?: string;
+  originalNote?: string;
+  /** true, wenn der Eintrag komplett im Pausenfenster lag und deshalb ganz gelöscht wurde. */
+  wasDeleted: boolean;
+  /** Falls der Eintrag gesplittet wurde: ID des dabei neu entstandenen zweiten Teils (wird beim Rückgängigmachen wieder gelöscht). */
+  splitEntryId?: ID;
 }
 
 /**

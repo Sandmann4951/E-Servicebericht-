@@ -60,7 +60,11 @@ export async function checkInDay(): Promise<WorkDay> {
  * in die Leerlaufzeit ein. Zusätzlich entsteht ein eigener, isBreak-
  * markierter Eintrag für die Pause selbst (Nachvollziehbarkeit/
  * Lohnabrechnung, sichtbar in der Tages-Statistik) - der zählt nirgends
- * als Arbeitszeit (siehe TimeEntry.isBreak).
+ * als Arbeitszeit (siehe TimeEntry.isBreak). Die dabei anfallenden
+ * TimeEntryTrimRecords (Vorher-Zustand der weggeschnittenen Nachbar-
+ * Einträge) werden direkt am Pause-Eintrag gespeichert, damit
+ * timeEntries.restoreBreak() die Pause später bei Bedarf wieder rückgängig
+ * machen und die weggeschnittene Zeit automatisch gutschreiben kann.
  *
  * Die Zusammenfassung umfasst bewusst den GANZEN Kalendertag (`active.date`),
  * nicht nur diesen einen WorkDay-Datensatz: wurde am selben Tag bereits
@@ -81,13 +85,14 @@ export async function checkOutDay(breaks: BreakInput[] = []): Promise<DaySummary
   for (const brk of breaks) {
     if (!brk.startTime || !brk.endTime) continue;
     const overlaps = await findOverlappingTimeEntries(active.date, brk.startTime, brk.endTime);
-    await trimOverlappingTimeEntries(overlaps, brk.startTime, brk.endTime);
+    const trimRecords = await trimOverlappingTimeEntries(overlaps, brk.startTime, brk.endTime);
     await addTimeEntry(undefined, {
       date: active.date,
       startTime: brk.startTime,
       endTime: brk.endTime,
       workDayId: active.id,
-      isBreak: true
+      isBreak: true,
+      trimRecords
     });
   }
 

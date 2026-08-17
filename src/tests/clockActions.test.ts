@@ -11,10 +11,12 @@ import {
 import { createReport, finalizeReport, getReport, listReports } from '../lib/db/reports';
 import {
   addTimeEntry,
+  deleteTimeEntry,
   getGloballyActiveTimeEntry,
   listTimeEntries,
   listTimeEntriesForWorkDay,
   listUnassignedIdleEntries,
+  restoreBreak,
   updateTimeEntry
 } from '../lib/db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from '../lib/db/workDays';
@@ -311,6 +313,106 @@ describe('checkOutDay mit Pausen', () => {
 
     expect(summary?.breakMinutes).toBe(0);
     expect(summary?.totalMinutes).toBe(30);
+  });
+});
+
+describe('restoreBreak (Pause rückgängig machen)', () => {
+  it('stellt einen gesplitteten Eintrag wieder als einen einzigen her', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    await addTimeEntry(report.id, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    await checkOutDay([{ startTime: '12:00', endTime: '12:30' }]);
+    const breakEntry = (await listTimeEntriesForWorkDay(day.id)).find((e) => e.isBreak)!;
+
+    await restoreBreak(breakEntry.id);
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].startTime).toBe('08:00');
+    expect(entries[0].endTime).toBe('16:00');
+    expect(entries[0].durationMinutes).toBe(480);
+
+    const updatedReport = await getReport(report.id);
+    expect(updatedReport?.totalDurationMinutes).toBe(480);
+    expect((await listTimeEntriesForWorkDay(day.id)).find((e) => e.isBreak)).toBeUndefined();
+  });
+
+  it('stellt einen am Anfang gekürzten Eintrag wieder her (Pause direkt am Start)', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    await checkOutDay([{ startTime: '08:00', endTime: '08:30' }]);
+    const breakEntry = (await listTimeEntriesForWorkDay(day.id)).find((e) => e.isBreak)!;
+
+    await restoreBreak(breakEntry.id);
+
+    const idleEntries = (await listTimeEntriesForWorkDay(day.id)).filter((e) => !e.isBreak);
+    expect(idleEntries).toHaveLength(1);
+    expect(idleEntries[0].startTime).toBe('08:00');
+    expect(idleEntries[0].endTime).toBe('16:00');
+  });
+
+  it('legt einen komplett innerhalb der Pause liegenden (dabei gelöschten) Eintrag neu an', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '12:00', endTime: '12:15', workDayId: day.id }); // ganz in der Pause
+
+    await checkOutDay([{ startTime: '11:00', endTime: '13:00' }]);
+    const all = await listTimeEntriesForWorkDay(day.id);
+    const breakEntry = all.find((e) => e.isBreak)!;
+    // Der ursprüngliche 12:00-12:15-Eintrag wurde beim Anlegen der Pause komplett gelöscht.
+    expect(all.filter((e) => !e.isBreak)).toHaveLength(0);
+
+    await restoreBreak(breakEntry.id);
+
+    const remaining = (await listTimeEntriesForWorkDay(day.id)).filter((e) => !e.isBreak);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].startTime).toBe('12:00');
+    expect(remaining[0].endTime).toBe('12:15');
+  });
+
+  it('betrifft nur die Nachbarn der gelöschten Pause, nicht andere Pausen am selben Tag', async () => {
+    const day = await checkInWorkDay();
+    await addTimeEntry(undefined, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    await checkOutDay([
+      { startTime: '10:00', endTime: '10:15' },
+      { startTime: '12:00', endTime: '12:30' }
+    ]);
+    const breaks = (await listTimeEntriesForWorkDay(day.id)).filter((e) => e.isBreak);
+    expect(breaks).toHaveLength(2);
+
+    const firstBreak = breaks.find((b) => b.startTime === '10:00')!;
+    await restoreBreak(firstBreak.id);
+
+    const remainingBreaks = (await listTimeEntriesForWorkDay(day.id)).filter((e) => e.isBreak);
+    expect(remainingBreaks).toHaveLength(1);
+    expect(remainingBreaks[0].startTime).toBe('12:00');
+  });
+
+  it('überspringt Wiederherstellungsschritte für zwischenzeitlich anders gelöschte Nachbar-Einträge, statt abzubrechen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    await addTimeEntry(report.id, { date: todayISODate(), startTime: '08:00', endTime: '16:00', workDayId: day.id });
+
+    await checkOutDay([{ startTime: '12:00', endTime: '12:30' }]);
+    const breakEntry = (await listTimeEntriesForWorkDay(day.id)).find((e) => e.isBreak)!;
+    const [firstHalf] = await listTimeEntries(report.id); // 08:00-12:00, erster von zwei gesplitteten Teilen
+
+    // Nutzer löscht manuell einen der beiden Trim-Nachbarn, bevor die Pause rückgängig gemacht wird.
+    await deleteTimeEntry(firstHalf.id);
+
+    await expect(restoreBreak(breakEntry.id)).resolves.not.toThrow();
+    expect((await listTimeEntriesForWorkDay(day.id)).find((e) => e.isBreak)).toBeUndefined();
+  });
+
+  it('hat keinen Effekt auf einen Eintrag, der keine Pause ist', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '09:00' });
+
+    await restoreBreak(entry.id);
+
+    expect(await listTimeEntries(report.id)).toHaveLength(1);
   });
 });
 

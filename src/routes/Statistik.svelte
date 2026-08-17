@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getDayBreaks, getDayProjectBreakdown, getDayStats, type DayBreak, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
-  import { deleteTimeEntry } from '../lib/db/timeEntries';
+  import { restoreBreak } from '../lib/db/timeEntries';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
   import type { Absence, AbsenceType } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -122,15 +122,13 @@
   });
 
   async function removeBreak(breakId: string): Promise<void> {
-    // Löscht nur den Pause-Datensatz selbst - die beim Anlegen der Pause
-    // gekürzten Nachbar-Einträge (siehe checkOutDay()) werden dabei bewusst
-    // NICHT automatisch wiederhergestellt (dieselbe Grenze wie beim
-    // bestehenden Überschneidungs-Wegschneiden in TimeEntrySection.svelte,
-    // wo ein Rückgängig ebenfalls nicht vorgesehen ist). Wurde die Pause
-    // versehentlich falsch eingetragen, kann die betroffene Zeit im
-    // Zeiten-Tab des jeweiligen Berichts manuell nachgetragen werden.
-    if (!confirm('Pause löschen? Die dadurch gekürzte Zeit wird NICHT automatisch wiederhergestellt.')) return;
-    await deleteTimeEntry(breakId);
+    // restoreBreak() macht die beim Anlegen der Pause gekürzten/gesplitteten/
+    // gelöschten Nachbar-Einträge automatisch wieder rückgängig (siehe
+    // TimeEntry.trimRecords) - die weggeschnittene Zeit wird also wieder
+    // dem Projekt bzw. der Leerlaufzeit gutgeschrieben, bei dem sie
+    // ursprünglich abgezogen wurde.
+    if (!confirm('Pause löschen? Die dadurch abgezogene Zeit wird dem Projekt/der Leerlaufzeit wieder gutgeschrieben.')) return;
+    await restoreBreak(breakId);
     dayBreaks = await getDayBreaks(selectedDate);
     await load();
   }

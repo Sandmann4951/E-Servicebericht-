@@ -1,7 +1,7 @@
 import { getDB } from './client';
 import { recomputeReportSummary } from './summary';
 import { computeDurationMinutes, parseTimeToMinutes } from '../utils/date';
-import type { ID, TimeEntry } from './types';
+import type { ID, TimeEntry, TimeEntryTrimRecord } from './types';
 
 const ALL_STORES = ['timeEntries', 'materialItems', 'photos', 'reports'] as const;
 
@@ -16,6 +16,8 @@ export interface TimeEntryInput {
   workDayId?: ID;
   /** Siehe TimeEntry.isBreak - nur von checkOutDay() gesetzt. */
   isBreak?: boolean;
+  /** Siehe TimeEntry.trimRecords - nur von checkOutDay() beim Anlegen eines Pause-Eintrags gesetzt. */
+  trimRecords?: TimeEntryTrimRecord[];
 }
 
 /**
@@ -154,15 +156,23 @@ export async function findOverlappingTimeEntries(
  * Nutzt bewusst dieselbe (nicht mitternachts-bewusste) Minuten-Umrechnung wie
  * findOverlappingTimeEntries(), damit die hier bearbeiteten Einträge exakt zu
  * den dort gefundenen Überschneidungen passen.
+ *
+ * Liefert für jeden tatsächlich veränderten Eintrag einen TimeEntryTrimRecord
+ * mit dessen "Vorher"-Zustand zurück - Grundlage für restoreBreak(), das
+ * damit eine Pause wieder rückgängig machen kann. Aufrufer, die das nicht
+ * brauchen (z.B. die manuelle Überschneidungsprüfung in
+ * TimeEntrySection.svelte), ignorieren den Rückgabewert einfach.
  */
 export async function trimOverlappingTimeEntries(
   overlaps: TimeEntry[],
   cutStartTime: string,
   cutEndTime: string
-): Promise<void> {
+): Promise<TimeEntryTrimRecord[]> {
   const cutStart = parseTimeToMinutes(cutStartTime);
   const cutEnd = parseTimeToMinutes(cutEndTime);
-  if (cutStart === undefined || cutEnd === undefined) return;
+  if (cutStart === undefined || cutEnd === undefined) return [];
+
+  const records: TimeEntryTrimRecord[] = [];
 
   for (const entry of overlaps) {
     if (!entry.startTime || !entry.endTime) continue;
@@ -173,9 +183,20 @@ export async function trimOverlappingTimeEntries(
     const remainderBefore = entryStart < cutStart;
     const remainderAfter = entryEnd > cutEnd;
 
+    const record: TimeEntryTrimRecord = {
+      entryId: entry.id,
+      reportId: entry.reportId,
+      workDayId: entry.workDayId,
+      date: entry.date,
+      originalStartTime: entry.startTime,
+      originalEndTime: entry.endTime,
+      originalNote: entry.note,
+      wasDeleted: false
+    };
+
     if (remainderBefore && remainderAfter) {
       await updateTimeEntry(entry.id, { endTime: cutStartTime });
-      await addTimeEntry(entry.reportId, {
+      const created = await addTimeEntry(entry.reportId, {
         date: entry.date,
         startTime: cutEndTime,
         endTime: entry.endTime,
@@ -183,14 +204,19 @@ export async function trimOverlappingTimeEntries(
         workDayId: entry.workDayId,
         isBreak: entry.isBreak
       });
+      record.splitEntryId = created.id;
     } else if (remainderBefore) {
       await updateTimeEntry(entry.id, { endTime: cutStartTime });
     } else if (remainderAfter) {
       await updateTimeEntry(entry.id, { startTime: cutEndTime });
     } else {
       await deleteTimeEntry(entry.id);
+      record.wasDeleted = true;
     }
+    records.push(record);
   }
+
+  return records;
 }
 
 /**
@@ -211,6 +237,7 @@ export async function addTimeEntry(reportId: ID | undefined, input: TimeEntryInp
     durationMinutes: input.durationMinutes,
     note: input.note?.trim() || undefined,
     isBreak: input.isBreak || undefined,
+    trimRecords: input.trimRecords,
     createdAt: now,
     updatedAt: now
   };
@@ -272,4 +299,55 @@ export async function deleteTimeEntry(id: ID): Promise<void> {
   await store.delete(id);
   if (entry.reportId) await recomputeReportSummary(tx, entry.reportId);
   await tx.done;
+}
+
+/**
+ * Macht eine Pause rückgängig: löscht den Pause-Eintrag selbst und
+ * schreibt die beim Anlegen weggeschnittene Zeit den betroffenen Nachbar-
+ * Einträgen wieder gut (Gegenstück zu trimOverlappingTimeEntries(), siehe
+ * TimeEntry.trimRecords). Für jeden gespeicherten Trim-Datensatz:
+ * - wurde der Nachbar-Eintrag beim Anlegen der Pause komplett gelöscht
+ *   (lag ganz im Pausenfenster) -> wird er mit den ursprünglichen Werten
+ *   neu angelegt (neue ID - die alte ist durchs Löschen "verbraucht",
+ *   nichts referenziert TimeEntry-IDs von außen, daher unkritisch).
+ * - wurde er gesplittet -> der dabei neu entstandene zweite Teil wird
+ *   gelöscht, der ursprüngliche Eintrag bekommt seine originale Endzeit
+ *   zurück.
+ * - wurde er nur gekürzt (Start oder Ende verschoben) -> bekommt seine
+ *   ursprüngliche Start-/Endzeit zurück.
+ * Wurde ein betroffener Nachbar-Eintrag zwischenzeitlich bereits manuell
+ * gelöscht, wird dieser einzelne Wiederherstellungsschritt übersprungen -
+ * die übrigen laufen trotzdem durch, statt die ganze Wiederherstellung
+ * abzubrechen. Kein Effekt, wenn `id` keinen Pause-Eintrag bezeichnet.
+ */
+export async function restoreBreak(id: ID): Promise<void> {
+  const db = await getDB();
+  const breakEntry = await db.get('timeEntries', id);
+  if (!breakEntry?.isBreak) return;
+
+  for (const record of breakEntry.trimRecords ?? []) {
+    if (record.wasDeleted) {
+      await addTimeEntry(record.reportId, {
+        date: record.date,
+        startTime: record.originalStartTime,
+        endTime: record.originalEndTime,
+        note: record.originalNote,
+        workDayId: record.workDayId
+      });
+      continue;
+    }
+
+    if (record.splitEntryId) {
+      await deleteTimeEntry(record.splitEntryId);
+    }
+
+    const current = await db.get('timeEntries', record.entryId);
+    if (!current) continue; // zwischenzeitlich anderweitig gelöscht - überspringen
+    await updateTimeEntry(record.entryId, {
+      startTime: record.originalStartTime,
+      endTime: record.originalEndTime
+    });
+  }
+
+  await deleteTimeEntry(id);
 }
