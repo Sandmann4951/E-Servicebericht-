@@ -106,6 +106,35 @@
   async function persistNow(): Promise<void> {
     if (!reportId) {
       if (!projectNumber.trim()) return;
+      const trimmed = projectNumber.trim();
+
+      // Bevor tatsächlich ein neuer Bericht angelegt wird: prüfen, ob es zu
+      // dieser Projektnummer bereits einen offenen (nicht gesperrten)
+      // Bericht gibt - man tippt schnell mal aus Versehen dieselbe Nummer
+      // erneut ein (z.B. wenn "+ Neuer Bericht" statt der bestehenden Karte
+      // in der Übersicht angetippt wurde), statt im bereits laufenden
+      // Bericht weiterzuarbeiten. Dieselbe "offen" = "nicht finalizedAt"-
+      // Definition wie bei startProjectByNumber() (Direkt-einchecken-Flow) -
+      // dort wird ein solcher Bericht automatisch wiederverwendet; hier,
+      // beim bewussten manuellen Anlegen über "+ Neuer Bericht", fragt die
+      // App stattdessen aktiv nach, weil der Nutzer hier ausdrücklich einen
+      // Bericht angelegt hat und die Wiederverwendung nicht überraschend
+      // "unterjubeln" soll.
+      const openExisting = (await listReportsByProjectNumber(trimmed)).find((r) => !r.finalizedAt);
+      if (openExisting) {
+        const label = openExisting.projectDescription
+          ? `${openExisting.projectNumber} – ${openExisting.projectDescription}`
+          : openExisting.projectNumber;
+        const customerHint = openExisting.customer ? ` (Kunde: ${openExisting.customer})` : '';
+        const wantsExisting = confirm(
+          `Für Projekt "${label}"${customerHint} existiert bereits ein offener Bericht.\n\nOK = im bestehenden Bericht weiterarbeiten\nAbbrechen = trotzdem einen neuen Bericht anlegen`
+        );
+        if (wantsExisting) {
+          navigate(`/reports/${openExisting.id}`, { replace: true });
+          return;
+        }
+      }
+
       const created = await createReport({
         projectNumber,
         projectDescription: projectDescription || undefined,

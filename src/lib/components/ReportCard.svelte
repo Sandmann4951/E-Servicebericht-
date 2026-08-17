@@ -30,6 +30,10 @@
     </div>
   </div>
 
+  {#if report.projectDescription}
+    <div class="description">{report.projectDescription}</div>
+  {/if}
+
   {#if report.customer}
     <div class="customer">{report.customer}</div>
   {/if}
@@ -114,6 +118,11 @@
   .project {
     font-weight: 700;
     font-size: 1.05rem;
+  }
+
+  .description {
+    color: var(--color-text-muted);
+    margin-top: var(--space-1);
   }
 
   .customer {
