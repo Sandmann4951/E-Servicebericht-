@@ -6,6 +6,7 @@ import {
   formatDurationMinutes,
   nowHHmm,
   startOfWeekISO,
+  subtractTimeRange,
   todayISODate
 } from '../../lib/utils/date';
 
@@ -95,5 +96,51 @@ describe('startOfWeekISO', () => {
   it('rechnet über einen Monatswechsel hinweg korrekt', () => {
     // 2026-09-01 ist ein Dienstag, die Woche begann am 2026-08-31 (Montag).
     expect(startOfWeekISO('2026-09-01')).toBe('2026-08-31');
+  });
+});
+
+describe('subtractTimeRange', () => {
+  it('liefert einen Bereich am Ende, wenn der neue Zeitraum von vorne verkürzt wurde', () => {
+    // alt: 08:00-16:00, neu: 10:00-16:00 -> freigeworden: 08:00-10:00
+    expect(subtractTimeRange({ start: '08:00', end: '16:00' }, { start: '10:00', end: '16:00' })).toEqual([
+      { start: '08:00', end: '10:00' }
+    ]);
+  });
+
+  it('liefert einen Bereich am Anfang, wenn der neue Zeitraum von hinten verkürzt wurde', () => {
+    // alt: 08:00-16:00, neu: 08:00-14:00 -> freigeworden: 14:00-16:00
+    expect(subtractTimeRange({ start: '08:00', end: '16:00' }, { start: '08:00', end: '14:00' })).toEqual([
+      { start: '14:00', end: '16:00' }
+    ]);
+  });
+
+  it('liefert zwei Bereiche, wenn von beiden Seiten verkürzt wurde', () => {
+    // alt: 08:00-16:00, neu: 10:00-14:00 -> freigeworden: 08:00-10:00 und 14:00-16:00
+    expect(subtractTimeRange({ start: '08:00', end: '16:00' }, { start: '10:00', end: '14:00' })).toEqual([
+      { start: '08:00', end: '10:00' },
+      { start: '14:00', end: '16:00' }
+    ]);
+  });
+
+  it('liefert einen Bereich, wenn der Zeitraum verschoben statt nur verkleinert wurde', () => {
+    // alt: 08:00-12:00, neu: 10:00-12:00 -> freigeworden: 08:00-10:00 (Überlappung 10:00-12:00 entfällt)
+    expect(subtractTimeRange({ start: '08:00', end: '12:00' }, { start: '10:00', end: '13:00' })).toEqual([
+      { start: '08:00', end: '10:00' }
+    ]);
+  });
+
+  it('liefert eine leere Liste, wenn der neue Zeitraum den alten vollständig abdeckt (Erweiterung)', () => {
+    expect(subtractTimeRange({ start: '08:00', end: '12:00' }, { start: '07:00', end: '13:00' })).toEqual([]);
+    expect(subtractTimeRange({ start: '08:00', end: '12:00' }, { start: '08:00', end: '12:00' })).toEqual([]);
+  });
+
+  it('liefert den unveränderten alten Bereich, wenn der neue Bereich komplett außerhalb liegt', () => {
+    expect(subtractTimeRange({ start: '08:00', end: '10:00' }, { start: '14:00', end: '16:00' })).toEqual([
+      { start: '08:00', end: '10:00' }
+    ]);
+  });
+
+  it('liefert eine leere Liste bei ungültigem Format', () => {
+    expect(subtractTimeRange({ start: 'x', end: '16:00' }, { start: '10:00', end: '14:00' })).toEqual([]);
   });
 });

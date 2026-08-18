@@ -4,10 +4,10 @@
     deleteTimeEntry,
     findOverlappingTimeEntries,
     listTimeEntries,
-    trimOverlappingTimeEntries,
-    updateTimeEntry
+    trimOverlappingTimeEntries
   } from '../db/timeEntries';
   import { getReport } from '../db/reports';
+  import { updateManualTimeEntry } from '../clockActions';
   import type { TimeEntry } from '../db/types';
   import { computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
   import { exceedsMaxDailyWork } from '../utils/arbzg';
@@ -19,6 +19,11 @@
   let loading = $state(true);
   let showForm = $state(false);
   let editingId = $state<string | undefined>();
+  // Voller Original-Eintrag beim Bearbeiten (nicht nur die ID) - wird von
+  // persistEntry() an clockActions.updateManualTimeEntry() durchgereicht,
+  // damit eine manuelle Verkürzung/Verschiebung die freiwerdende Zeit als
+  // Leerlaufzeit-Eintrag erhält, statt sie ersatzlos zu überschreiben.
+  let editingOriginal = $state<TimeEntry | undefined>();
 
   let formDate = $state(todayISODate());
   let formStart = $state('');
@@ -44,6 +49,7 @@
     formEnd = '';
     formNote = '';
     editingId = undefined;
+    editingOriginal = undefined;
     showForm = false;
   }
 
@@ -54,6 +60,7 @@
 
   function startEdit(entry: TimeEntry): void {
     editingId = entry.id;
+    editingOriginal = entry;
     formDate = entry.date;
     formStart = entry.startTime ?? '';
     formEnd = entry.endTime ?? '';
@@ -82,8 +89,8 @@
   }
 
   async function persistEntry(payload: { date: string; startTime?: string; endTime?: string; note: string }): Promise<void> {
-    if (editingId) {
-      await updateTimeEntry(editingId, payload);
+    if (editingId && editingOriginal) {
+      await updateManualTimeEntry(editingOriginal, payload);
     } else {
       await addTimeEntry(reportId, payload);
     }

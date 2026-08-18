@@ -69,6 +69,51 @@ export function addMinutesToTime(time: string, minutes: number): string {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
+export interface TimeRange {
+  start: string;
+  end: string;
+}
+
+/**
+ * Berechnet, welche Teile von `a` NICHT von `b` abgedeckt werden ("a minus
+ * b") - Grundlage für clockActions.updateManualTimeEntry(): wird ein
+ * bestehender Zeiteintrag manuell verkleinert oder verschoben (z.B. weil im
+ * Nachhinein auffällt, dass ein Teil der Zeit tatsächlich für ein anderes
+ * Projekt draufging), soll die dadurch freiwerdende Zeit nicht spurlos
+ * verschwinden, sondern als eigener Leerlaufzeit-Eintrag erhalten bleiben.
+ * Nutzt dieselbe "Ende vor Start -> über Mitternacht"-Konvention wie
+ * computeDurationMinutes(), setzt also voraus, dass `a` und `b` sich auf
+ * denselben Kalendertag beziehen (kein eigenes End-Datum). Liefert bis zu
+ * zwei Teilbereiche (Anfang und/oder Ende von `a`, je nachdem wo genau sich
+ * `b` überschneidet); liegt `b` komplett außerhalb von `a`, wird `a`
+ * unverändert als einziger Teilbereich zurückgegeben; deckt `b` `a`
+ * vollständig ab, eine leere Liste. Liefert eine leere Liste auch bei
+ * ungültigem Format.
+ */
+export function subtractTimeRange(a: TimeRange, b: TimeRange): TimeRange[] {
+  const aStart = parseTimeToMinutes(a.start);
+  let aEnd = parseTimeToMinutes(a.end);
+  const bStart = parseTimeToMinutes(b.start);
+  let bEnd = parseTimeToMinutes(b.end);
+  if (aStart === undefined || aEnd === undefined || bStart === undefined || bEnd === undefined) return [];
+  if (aEnd <= aStart) aEnd += 24 * 60;
+  if (bEnd <= bStart) bEnd += 24 * 60;
+
+  // `b` auf den Wertebereich von `a` einschränken - alles außerhalb von `a`
+  // ist für die Lücken-Berechnung irrelevant.
+  const clampedBStart = Math.min(Math.max(bStart, aStart), aEnd);
+  const clampedBEnd = Math.min(Math.max(bEnd, aStart), aEnd);
+
+  const ranges: TimeRange[] = [];
+  if (clampedBStart > aStart) {
+    ranges.push({ start: addMinutesToTime('00:00', aStart), end: addMinutesToTime('00:00', clampedBStart) });
+  }
+  if (clampedBEnd < aEnd) {
+    ranges.push({ start: addMinutesToTime('00:00', clampedBEnd), end: addMinutesToTime('00:00', aEnd) });
+  }
+  return ranges;
+}
+
 /** Formatiert Minuten als "H:MM Std." für die Anzeige (z.B. "7:30 Std."). */
 export function formatDurationMinutes(totalMinutes: number | undefined | null): string {
   const minutesTotal = Math.max(0, totalMinutes ?? 0);

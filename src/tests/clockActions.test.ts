@@ -8,7 +8,8 @@ import {
   reassignIdleEntry,
   startProjectByNumber,
   switchToIdle,
-  switchToProject
+  switchToProject,
+  updateManualTimeEntry
 } from '../lib/clockActions';
 import { createReport, finalizeReport, getReport, listReports } from '../lib/db/reports';
 import {
@@ -600,6 +601,66 @@ describe('reassignIdleEntry', () => {
     expect(updated?.timeEntryCount).toBe(1);
     expect(updated?.totalDurationMinutes).toBe(60);
     expect(await listUnassignedIdleEntries()).toEqual([]);
+  });
+});
+
+describe('updateManualTimeEntry (manuelles Bearbeiten eines Zeiteintrags im Zeiten-Tab)', () => {
+  it('legt für die von vorne weggekürzte Zeit einen Leerlaufzeit-Eintrag an', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const original = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await updateManualTimeEntry(original, { date: '2026-08-10', startTime: '10:00', endTime: '16:00', note: '' });
+
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries).toHaveLength(1);
+    expect(reportEntries[0]).toMatchObject({ startTime: '10:00', endTime: '16:00' });
+
+    const idle = await listUnassignedIdleEntries();
+    expect(idle).toHaveLength(1);
+    expect(idle[0]).toMatchObject({ date: '2026-08-10', startTime: '08:00', endTime: '10:00', reportId: undefined });
+  });
+
+  it('legt für die von beiden Seiten weggekürzte Zeit zwei Leerlaufzeit-Einträge an', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const original = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await updateManualTimeEntry(original, { date: '2026-08-10', startTime: '10:00', endTime: '14:00', note: '' });
+
+    const idle = await listUnassignedIdleEntries();
+    expect(idle).toHaveLength(2);
+    const ranges = idle.map((e) => `${e.startTime}-${e.endTime}`).sort();
+    expect(ranges).toEqual(['08:00-10:00', '14:00-16:00']);
+  });
+
+  it('legt keinen Leerlaufzeit-Eintrag an, wenn die Zeit nur erweitert wird', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const original = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+
+    await updateManualTimeEntry(original, { date: '2026-08-10', startTime: '07:00', endTime: '13:00', note: '' });
+
+    expect(await listUnassignedIdleEntries()).toEqual([]);
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries[0]).toMatchObject({ startTime: '07:00', endTime: '13:00' });
+  });
+
+  it('legt keinen Leerlaufzeit-Eintrag an, wenn ein noch offener Eintrag erstmals eine Endzeit bekommt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const original = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00' });
+
+    await updateManualTimeEntry(original, { date: '2026-08-10', startTime: '08:00', endTime: '16:00', note: '' });
+
+    expect(await listUnassignedIdleEntries()).toEqual([]);
+  });
+
+  it('legt keinen Leerlaufzeit-Eintrag an, wenn der Eintrag dabei auf einen anderen Tag verschoben wird', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const original = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '16:00' });
+
+    await updateManualTimeEntry(original, { date: '2026-08-11', startTime: '08:00', endTime: '10:00', note: '' });
+
+    expect(await listUnassignedIdleEntries()).toEqual([]);
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries[0]).toMatchObject({ date: '2026-08-11', startTime: '08:00', endTime: '10:00' });
   });
 });
 

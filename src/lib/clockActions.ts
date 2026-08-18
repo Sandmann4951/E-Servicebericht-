@@ -8,8 +8,8 @@ import {
   updateTimeEntry
 } from './db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
-import type { ID, ServiceReport, WorkDay } from './db/types';
-import { addMinutesToTime, nowHHmm, todayISODate } from './utils/date';
+import type { ID, ServiceReport, TimeEntry, WorkDay } from './db/types';
+import { addMinutesToTime, nowHHmm, subtractTimeRange, todayISODate } from './utils/date';
 import { MAX_DAILY_CLOCKED_MINUTES } from './utils/arbzg';
 
 export interface DaySummary {
@@ -259,6 +259,49 @@ export async function switchToIdle(): Promise<void> {
 /** Ordnet einen bestehenden Leerlaufzeit-Eintrag nachträglich einem Bericht zu. */
 export async function reassignIdleEntry(entryId: ID, reportId: ID): Promise<void> {
   await updateTimeEntry(entryId, { reportId });
+}
+
+/**
+ * Aktualisiert einen manuell im Zeiten-Tab bearbeiteten (bereits
+ * bestehenden) Zeiteintrag. Wird der abgedeckte Zeitraum dabei gegenüber dem
+ * bisherigen VERKLEINERT oder verschoben - z.B. weil im Nachhinein auffällt,
+ * dass ein Teil der Zeit tatsächlich für ein anderes Projekt draufging -,
+ * verschwindet die dadurch freiwerdende Zeit nicht einfach spurlos:
+ * `subtractTimeRange()` berechnet die Lücke(n) zwischen altem und neuem
+ * Zeitraum, für jede wird ein eigener Leerlaufzeit-Eintrag (reportId
+ * undefined) angelegt. Der lässt sich anschließend wie jede andere
+ * Leerlaufzeit einem Projekt zuordnen oder bleibt einfach Leerlaufzeit
+ * (siehe reassignIdleEntry()/Leerlaufzeiten.svelte) - statt dass die
+ * gesamte an diesem Tag gestempelte Zeit kommentarlos kürzer wird, sobald
+ * ein Eintrag nachträglich korrigiert wird.
+ *
+ * `original` ist der VOR der Bearbeitung geladene Zeiteintrag (von der
+ * aufrufenden Komponente übergeben, spart einen zusätzlichen DB-Read - beim
+ * Bearbeiten in TimeEntrySection.svelte liegt er ohnehin schon im
+ * geladenen `entries`-Array vor). Die Lücken-Berechnung greift nur, wenn
+ * sowohl der bisherige als auch der neue Zeitraum vollständig sind (Start
+ * UND Ende gesetzt) und sich das Datum nicht ändert - andernfalls (z.B. ein
+ * noch offener Eintrag bekommt erstmals eine Endzeit, oder der Eintrag wird
+ * auf einen anderen Tag verschoben) gibt es keine sinnvoll vergleichbare
+ * "alte" Zeitspanne, dann wird nur normal aktualisiert, ohne Leerlaufzeit
+ * anzulegen.
+ */
+export async function updateManualTimeEntry(
+  original: TimeEntry,
+  payload: { date: string; startTime?: string; endTime?: string; note?: string }
+): Promise<void> {
+  await updateTimeEntry(original.id, payload);
+
+  if (!original.startTime || !original.endTime || !payload.startTime || !payload.endTime) return;
+  if (original.date !== payload.date) return;
+
+  const gaps = subtractTimeRange(
+    { start: original.startTime, end: original.endTime },
+    { start: payload.startTime, end: payload.endTime }
+  );
+  for (const gap of gaps) {
+    await addTimeEntry(undefined, { date: original.date, startTime: gap.start, endTime: gap.end });
+  }
 }
 
 export interface StartProjectResult {
