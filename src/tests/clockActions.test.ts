@@ -260,7 +260,23 @@ describe('autoCheckOutIfExceeded (automatisches Ausstempeln bei Überschreitung 
     }
   });
 
-  it('stempelt automatisch aus, sobald die Höchstarbeitszeit (10 Std.) erreicht ist, gekappt auf Einstempelzeit + 10 Std. statt auf "jetzt"', async () => {
+  it('liefert noch undefined bei genau 10 Std. verstrichener Zeit - die gesetzliche Pflichtpause (45 Min.) ist in der Grenze mit eingerechnet, nicht schon bei der reinen Höchstarbeitszeit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-08-10T06:00:00'));
+      await checkInDay();
+
+      vi.setSystemTime(new Date('2026-08-10T16:30:00')); // 10 Std. 30 Min. - über der reinen Höchstarbeitszeit, aber noch unter 10 Std. 45 Min.
+      const result = await autoCheckOutIfExceeded();
+
+      expect(result).toBeUndefined();
+      expect(await getActiveWorkDay()).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stempelt automatisch aus, sobald Höchstarbeitszeit + Pflichtpause (10 Std. 45 Min.) erreicht ist, gekappt auf Einstempelzeit + 10 Std. 45 Min. statt auf "jetzt"', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-08-10T06:00:00'));
@@ -269,14 +285,14 @@ describe('autoCheckOutIfExceeded (automatisches Ausstempeln bei Überschreitung 
       vi.setSystemTime(new Date('2026-08-10T18:30:00')); // 12,5 Std. später - deutlich über der Grenze
       const result = await autoCheckOutIfExceeded();
 
-      expect(result?.cappedAt).toBe('16:00'); // 06:00 + 10 Std., NICHT 18:30
-      expect(result?.workDay.checkOutTime).toBe('16:00');
+      expect(result?.cappedAt).toBe('16:45'); // 06:00 + 10 Std. 45 Min., NICHT 18:30
+      expect(result?.workDay.checkOutTime).toBe('16:45');
       expect(await getActiveWorkDay()).toBeUndefined();
 
       const entries = await listTimeEntriesForWorkDay(day.id);
       expect(entries).toHaveLength(1);
-      expect(entries[0].endTime).toBe('16:00');
-      expect(entries[0].durationMinutes).toBe(600);
+      expect(entries[0].endTime).toBe('16:45');
+      expect(entries[0].durationMinutes).toBe(645);
     } finally {
       vi.useRealTimers();
     }
@@ -292,7 +308,7 @@ describe('autoCheckOutIfExceeded (automatisches Ausstempeln bei Überschreitung 
       vi.setSystemTime(new Date('2026-08-12T09:00:00'));
       const result = await autoCheckOutIfExceeded();
 
-      expect(result?.cappedAt).toBe('18:00'); // 08:00 + 10 Std., unabhängig davon, wie viele Tage seither vergangen sind
+      expect(result?.cappedAt).toBe('18:45'); // 08:00 + 10 Std. 45 Min., unabhängig davon, wie viele Tage seither vergangen sind
     } finally {
       vi.useRealTimers();
     }
@@ -311,7 +327,7 @@ describe('autoCheckOutIfExceeded (automatisches Ausstempeln bei Überschreitung 
 
       const entries = await listTimeEntries(report.id);
       expect(entries).toHaveLength(1);
-      expect(entries[0].endTime).toBe('17:00'); // 07:00 + 10 Std.
+      expect(entries[0].endTime).toBe('17:45'); // 07:00 + 10 Std. 45 Min.
       expect(await getGloballyActiveTimeEntry()).toBeUndefined();
     } finally {
       vi.useRealTimers();

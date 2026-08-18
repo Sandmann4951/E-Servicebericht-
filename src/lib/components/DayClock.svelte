@@ -64,10 +64,11 @@
   });
 
   /**
-   * Prüft auf Überschreitung der gesetzlichen Höchstarbeitszeit (§3 ArbZG)
-   * und stempelt in dem Fall automatisch aus (siehe
-   * clockActions.autoCheckOutIfExceeded()) - typisches Zeichen dafür, dass
-   * vergessen wurde, manuell auszustempeln. Setzt bei einem Treffer
+   * Prüft auf Überschreitung der Höchstarbeitszeit inkl. der dabei
+   * gesetzlich vorgeschriebenen Pause (§3+§4 ArbZG, siehe
+   * MAX_DAILY_CLOCKED_MINUTES) und stempelt in dem Fall automatisch aus
+   * (siehe clockActions.autoCheckOutIfExceeded()) - typisches Zeichen dafür,
+   * dass vergessen wurde, manuell auszustempeln. Setzt bei einem Treffer
    * `autoCheckOutWarning`, damit die Vorlage einen entsprechenden
    * Hinweis-Banner zeigen kann (bleibt stehen, bis der Nutzer ihn aktiv
    * schließt - reine "Tag ausgestempelt"-Erfolgsmeldungen wie `daySummary`
@@ -296,10 +297,10 @@
       <div class="auto-checkout-warning">
         <p class="auto-checkout-warning-title"><Icon name="alert-triangle" size={16} />Automatisch ausgestempelt</p>
         <p class="auto-checkout-warning-text">
-          Am {formatDateDE(autoCheckOutWarning.workDay.date)} wurde die gesetzliche Höchstarbeitszeit überschritten -
-          du wurdest deshalb automatisch um {autoCheckOutWarning.cappedAt} Uhr ausgestempelt. Falls das nur daran
-          lag, dass vergessen wurde, manuell auszustempeln: bitte die Zeiten (und ggf. Pausen) für diesen Tag in der
-          Auswertung prüfen und korrigieren.
+          Am {formatDateDE(autoCheckOutWarning.workDay.date)} wurde die gesetzliche Höchstarbeitszeit inkl.
+          vorgeschriebener Pause (10 Std. 45 Min., §3+§4 ArbZG) überschritten - du wurdest deshalb automatisch um
+          {autoCheckOutWarning.cappedAt} Uhr ausgestempelt. Falls das nur daran lag, dass vergessen wurde, manuell
+          auszustempeln: bitte die Zeiten (und ggf. Pausen) für diesen Tag in der Auswertung prüfen und korrigieren.
         </p>
         <div class="auto-checkout-warning-actions">
           <button type="button" class="review" onclick={() => navigate('/statistik')}>Zur Auswertung</button>

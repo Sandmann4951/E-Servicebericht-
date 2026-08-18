@@ -10,7 +10,7 @@ import {
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from './db/workDays';
 import type { ID, ServiceReport, WorkDay } from './db/types';
 import { addMinutesToTime, nowHHmm, todayISODate } from './utils/date';
-import { MAX_DAILY_WORK_MINUTES } from './utils/arbzg';
+import { MAX_DAILY_CLOCKED_MINUTES } from './utils/arbzg';
 
 export interface DaySummary {
   workDay: WorkDay;
@@ -145,18 +145,24 @@ export async function checkOutDay(breaks: BreakInput[] = []): Promise<DaySummary
 
 export interface AutoCheckOutResult {
   workDay: WorkDay;
-  /** Die (gekappte) Auscheck-Zeit "HH:mm", auf die die gesetzliche Höchstarbeitszeit begrenzt wurde. */
+  /** Die (gekappte) Auscheck-Zeit "HH:mm", auf die die verstrichene Zeit begrenzt wurde. */
   cappedAt: string;
 }
 
 /**
- * Stempelt automatisch aus, wenn der laufende Tagesstempel die gesetzliche
- * Höchstarbeitszeit (siehe MAX_DAILY_WORK_MINUTES, §3 ArbZG) bereits
- * überschritten hat - typisches Zeichen dafür, dass schlicht vergessen
- * wurde, manuell auszustempeln (z.B. über Nacht eingestempelt geblieben,
- * oder Handy/App einfach liegen gelassen), statt tatsächlich so lange
- * gearbeitet worden zu sein. Ohne Effekt (liefert `undefined`), solange kein
- * Tag aktiv ist oder die Höchstarbeitszeit noch nicht erreicht ist.
+ * Stempelt automatisch aus, wenn seit dem Einstempeln bereits die
+ * Höchstarbeitszeit PLUS die dabei gesetzlich vorgeschriebene Pause
+ * verstrichen ist (siehe MAX_DAILY_CLOCKED_MINUTES, §3+§4 ArbZG) - typisches
+ * Zeichen dafür, dass schlicht vergessen wurde, manuell auszustempeln (z.B.
+ * über Nacht eingestempelt geblieben, oder Handy/App einfach liegen
+ * gelassen), statt tatsächlich so lange gearbeitet worden zu sein. Bewusst
+ * NICHT schon bei genau 10 Std. (der reinen Höchstarbeitszeit): wer laut
+ * Anleitung während der Pause eingestempelt bleibt und sie erst beim
+ * Ausstempeln nachträgt (checkOutDay()), ist bei einem vollen legalen
+ * 10-Std.-Arbeitstag inkl. Pflichtpause 10 Std. 45 Min. am Stück
+ * eingestempelt - das darf nicht schon vorher als "vergessen auszustempeln"
+ * gewertet werden. Ohne Effekt (liefert `undefined`), solange kein Tag aktiv
+ * ist oder diese Grenze noch nicht erreicht ist.
  *
  * Wird beim Öffnen der App und periodisch aufgerufen, solange sie geöffnet
  * ist (siehe DayClock.svelte) - eine tatsächliche Überschreitung kann sich
@@ -169,9 +175,13 @@ export interface AutoCheckOutResult {
  * Die Auscheck-Zeit wird bewusst NICHT auf "jetzt" gesetzt (das könnte, je
  * nachdem wann die App das nächste Mal geöffnet wird, viele Stunden oder
  * sogar Tage später sein und eine völlig unplausible Dauer ergeben),
- * sondern exakt auf Einstempelzeit + Höchstarbeitszeit gekappt - ein klar
- * erkennbarer, runder Platzhalterwert, den der Nutzer anschließend bewusst
- * prüfen und ggf. korrigieren soll (siehe Hinweis-Banner in DayClock.svelte).
+ * sondern exakt auf Einstempelzeit + MAX_DAILY_CLOCKED_MINUTES gekappt - ein
+ * klar erkennbarer, runder Platzhalterwert, den der Nutzer anschließend
+ * bewusst prüfen und ggf. korrigieren soll (siehe Hinweis-Banner in
+ * DayClock.svelte). War die Pause zu diesem Zeitpunkt noch nicht
+ * nachgetragen, zeigt der resultierende (dann über 10 Std. lange) Zeiteintrag
+ * selbst wieder die reguläre farbliche Hervorhebung (exceedsMaxDailyWork(),
+ * Grenze weiterhin 10 Std.) - ein zusätzlicher Anstoß, die Pause nachzutragen.
  */
 export async function autoCheckOutIfExceeded(): Promise<AutoCheckOutResult | undefined> {
   const active = await getActiveWorkDay();
@@ -182,9 +192,9 @@ export async function autoCheckOutIfExceeded(): Promise<AutoCheckOutResult | und
   const [hh, mm] = checkInTime.split(':').map(Number);
   const checkedInAt = new Date(y, m - 1, d, hh, mm);
   const elapsedMinutes = (Date.now() - checkedInAt.getTime()) / 60_000;
-  if (elapsedMinutes < MAX_DAILY_WORK_MINUTES) return undefined;
+  if (elapsedMinutes < MAX_DAILY_CLOCKED_MINUTES) return undefined;
 
-  const cappedAt = addMinutesToTime(checkInTime, MAX_DAILY_WORK_MINUTES);
+  const cappedAt = addMinutesToTime(checkInTime, MAX_DAILY_CLOCKED_MINUTES);
 
   const openEntry = await getGloballyActiveTimeEntry();
   if (openEntry && openEntry.workDayId === active.id) {

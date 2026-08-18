@@ -1,9 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_DAILY_WORK_MINUTES, exceedsMaxDailyWork } from '../../lib/utils/arbzg';
+import {
+  MANDATORY_BREAK_MINUTES,
+  MAX_DAILY_CLOCKED_MINUTES,
+  MAX_DAILY_WORK_MINUTES,
+  exceedsMaxDailyWork
+} from '../../lib/utils/arbzg';
 
 describe('MAX_DAILY_WORK_MINUTES', () => {
   it('entspricht 10 Stunden (§3 ArbZG)', () => {
     expect(MAX_DAILY_WORK_MINUTES).toBe(600);
+  });
+});
+
+describe('MANDATORY_BREAK_MINUTES', () => {
+  it('entspricht 45 Minuten (§4 ArbZG - 0,5h nach 6 Std. + 0,25h weitere nach 9 Std., insgesamt)', () => {
+    expect(MANDATORY_BREAK_MINUTES).toBe(45);
+  });
+});
+
+describe('MAX_DAILY_CLOCKED_MINUTES', () => {
+  it('entspricht Höchstarbeitszeit + Pflichtpause = 10 Std. 45 Min.', () => {
+    expect(MAX_DAILY_CLOCKED_MINUTES).toBe(MAX_DAILY_WORK_MINUTES + MANDATORY_BREAK_MINUTES);
+    expect(MAX_DAILY_CLOCKED_MINUTES).toBe(645);
   });
 });
 
