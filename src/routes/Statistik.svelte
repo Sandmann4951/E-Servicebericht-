@@ -10,7 +10,7 @@
     type DayStats
   } from '../lib/db/stats';
   import { deleteTimeEntry, restoreBreak } from '../lib/db/timeEntries';
-  import { addManualBreak, addManualIdleTime } from '../lib/clockActions';
+  import { addManualBreak, addManualIdleTime, updateManualIdleTime } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
   import type { Absence, AbsenceType, ID } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -104,6 +104,10 @@
   let addIdleStart = $state('');
   let addIdleEnd = $state('');
   let addingIdle = $state(false);
+  // Gesetzt, während das Formular oben einen BESTEHENDEN Leerlaufzeit-
+  // Eintrag bearbeitet statt einen neuen anzulegen (Klick auf eine Zeile in
+  // der Leerlaufzeit-Liste) - submitAddIdle() unterscheidet danach.
+  let editingIdleEntry = $state<DayIdleEntry | undefined>(undefined);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -209,28 +213,52 @@
   }
 
   function openAddIdleForm(): void {
+    editingIdleEntry = undefined;
     addIdleStart = '';
     addIdleEnd = '';
     addIdleFormOpen = true;
   }
 
+  /** Öffnet dasselbe Formular im Bearbeiten-Modus, vorausgefüllt mit den bisherigen Zeiten des angetippten Eintrags. */
+  function startEditIdle(entry: DayIdleEntry): void {
+    editingIdleEntry = entry;
+    addIdleStart = entry.startTime ?? '';
+    addIdleEnd = entry.endTime ?? '';
+    addIdleFormOpen = true;
+  }
+
   function closeAddIdleForm(): void {
     addIdleFormOpen = false;
+    editingIdleEntry = undefined;
   }
 
   /**
-   * Trägt Leerlaufzeit manuell nach - unabhängig von der Tagesstempeluhr,
-   * für einen beliebigen (auch zurückliegenden) Tag. Für den Fall, dass
-   * vergessen wurde, ein- oder auszustempeln, und deshalb für einen Teil des
-   * Tages gar keine Zeit erfasst wurde (siehe addManualIdleTime() in
-   * clockActions.ts).
+   * Legt Leerlaufzeit manuell an oder bearbeitet einen bestehenden Eintrag -
+   * unabhängig von der Tagesstempeluhr, für einen beliebigen (auch
+   * zurückliegenden) Tag. Neuanlage für den Fall, dass vergessen wurde,
+   * ein- oder auszustempeln, und deshalb für einen Teil des Tages gar keine
+   * Zeit erfasst wurde (siehe addManualIdleTime()); Bearbeiten z.B. um eine
+   * falsch eingetragene Uhrzeit zu korrigieren (siehe updateManualIdleTime()
+   * in clockActions.ts - verkleinert sich der Zeitraum dabei, bleibt die
+   * freiwerdende Zeit als eigener Leerlaufzeit-Eintrag erhalten, statt
+   * spurlos zu verschwinden).
    */
   async function submitAddIdle(): Promise<void> {
     if (!addIdleStart || !addIdleEnd || addingIdle) return;
     addingIdle = true;
     try {
-      await addManualIdleTime(selectedDate, addIdleStart, addIdleEnd);
+      if (editingIdleEntry) {
+        await updateManualIdleTime(
+          { id: editingIdleEntry.id, date: selectedDate, startTime: editingIdleEntry.startTime, endTime: editingIdleEntry.endTime },
+          selectedDate,
+          addIdleStart,
+          addIdleEnd
+        );
+      } else {
+        await addManualIdleTime(selectedDate, addIdleStart, addIdleEnd);
+      }
       addIdleFormOpen = false;
+      editingIdleEntry = undefined;
       dayIdleEntries = await getDayIdleEntries(selectedDate);
       await load();
     } finally {
@@ -563,8 +591,10 @@
           <ul class="breakdown">
             {#each dayIdleEntries as entry (entry.id)}
               <li class="time-entry-row">
-                <span class="breakdown-label plain">{entry.startTime}–{entry.endTime} Uhr</span>
-                <span class="breakdown-values"><span class="idle">{formatDurationMinutes(entry.minutes)}</span></span>
+                <button type="button" class="entry-main" onclick={() => startEditIdle(entry)}>
+                  <span class="breakdown-label plain">{entry.startTime}–{entry.endTime} Uhr</span>
+                  <span class="breakdown-values"><span class="idle">{formatDurationMinutes(entry.minutes)}</span></span>
+                </button>
                 <button type="button" class="remove-entry" onclick={() => removeIdleEntry(entry.id)} aria-label="Leerlaufzeit löschen">
                   <Icon name="trash" size={16} />
                 </button>
@@ -1234,6 +1264,21 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: var(--space-3);
+  }
+
+  .entry-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: auto;
+    text-align: left;
+    color: inherit;
+    font: inherit;
   }
 
   .remove-entry {

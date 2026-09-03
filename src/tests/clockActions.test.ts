@@ -10,6 +10,7 @@ import {
   startProjectByNumber,
   switchToIdle,
   switchToProject,
+  updateManualIdleTime,
   updateManualTimeEntry
 } from '../lib/clockActions';
 import { createReport, finalizeReport, getReport, listReports } from '../lib/db/reports';
@@ -630,6 +631,76 @@ describe('addManualIdleTime (manuelles Nachtragen von Leerlaufzeit, z.B. bei ver
     await addManualIdleTime('2026-08-10', '12:00', '');
 
     expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
+  });
+});
+
+describe('updateManualIdleTime (Bearbeiten eines Leerlaufzeit-Eintrags in der Auswertung)', () => {
+  it('aktualisiert die Uhrzeiten eines bestehenden Leerlaufzeit-Eintrags, der neue Zeitraum überschneidet den alten vollständig -> keine zusätzliche Lücke', async () => {
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+    const [entry] = await getDayIdleEntries('2026-08-10');
+
+    await updateManualIdleTime(
+      { id: entry.id, date: '2026-08-10', startTime: entry.startTime, endTime: entry.endTime },
+      '2026-08-10',
+      '07:00',
+      '11:00'
+    );
+
+    const entries = await getDayIdleEntries('2026-08-10');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ startTime: '07:00', endTime: '11:00', minutes: 240 });
+  });
+
+  it('legt beim Verkleinern die freiwerdende Zeit als eigenen (zweiten) Leerlaufzeit-Eintrag an', async () => {
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+    const [entry] = await getDayIdleEntries('2026-08-10');
+
+    await updateManualIdleTime(
+      { id: entry.id, date: '2026-08-10', startTime: entry.startTime, endTime: entry.endTime },
+      '2026-08-10',
+      '09:00',
+      '10:00'
+    );
+
+    const entries = await getDayIdleEntries('2026-08-10');
+    const ranges = entries.map((e) => `${e.startTime}-${e.endTime}`).sort();
+    expect(ranges).toEqual(['08:00-09:00', '09:00-10:00']);
+  });
+
+  it('schneidet eine versehentlich überschneidende Projektzeit heraus, ohne sich selbst als Überschneidung zu zählen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '12:00', endTime: '13:00' });
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+    const [entry] = await getDayIdleEntries('2026-08-10');
+
+    // Verschiebt den Leerlaufzeit-Eintrag so, dass er die Projektzeit überschneidet -
+    // der alte Zeitraum (08:00-10:00) überschneidet sich mit dem neuen (11:30-12:30)
+    // gar nicht, bleibt also nach demselben Prinzip wie beim Verkleinern als eigener
+    // Leerlaufzeit-Eintrag erhalten (siehe updateManualTimeEntry()/subtractTimeRange()).
+    await updateManualIdleTime(
+      { id: entry.id, date: '2026-08-10', startTime: entry.startTime, endTime: entry.endTime },
+      '2026-08-10',
+      '11:30',
+      '12:30'
+    );
+
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries).toHaveLength(1);
+    expect(reportEntries[0]).toMatchObject({ startTime: '12:30', endTime: '13:00' });
+    const idle = await getDayIdleEntries('2026-08-10');
+    expect(idle.map((e) => [e.startTime, e.endTime]).sort()).toEqual([
+      ['08:00', '10:00'],
+      ['11:30', '12:30']
+    ]);
+  });
+
+  it('hat keinen Effekt, wenn Start- oder Endzeit fehlt', async () => {
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+    const [entry] = await getDayIdleEntries('2026-08-10');
+
+    await updateManualIdleTime({ id: entry.id, date: '2026-08-10', startTime: entry.startTime, endTime: entry.endTime }, '2026-08-10', '', '11:00');
+
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([{ id: entry.id, startTime: '08:00', endTime: '10:00', minutes: 120 }]);
   });
 });
 

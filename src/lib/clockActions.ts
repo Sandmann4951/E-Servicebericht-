@@ -298,16 +298,19 @@ export async function reassignIdleEntry(entryId: ID, reportId: ID): Promise<void
  * `original` ist der VOR der Bearbeitung geladene Zeiteintrag (von der
  * aufrufenden Komponente übergeben, spart einen zusätzlichen DB-Read - beim
  * Bearbeiten in TimeEntrySection.svelte liegt er ohnehin schon im
- * geladenen `entries`-Array vor). Die Lücken-Berechnung greift nur, wenn
- * sowohl der bisherige als auch der neue Zeitraum vollständig sind (Start
- * UND Ende gesetzt) und sich das Datum nicht ändert - andernfalls (z.B. ein
- * noch offener Eintrag bekommt erstmals eine Endzeit, oder der Eintrag wird
- * auf einen anderen Tag verschoben) gibt es keine sinnvoll vergleichbare
- * "alte" Zeitspanne, dann wird nur normal aktualisiert, ohne Leerlaufzeit
- * anzulegen.
+ * geladenen `entries`-Array vor). Bewusst nur die tatsächlich benötigten
+ * Felder (`Pick<...>` statt der vollen `TimeEntry`), damit auch Aufrufer, die
+ * nur eine schlanke Projektion vorliegen haben (z.B. DayIdleEntry in
+ * Statistik.svelte), keinen zusätzlichen vollen Zeiteintrag laden müssen. Die
+ * Lücken-Berechnung greift nur, wenn sowohl der bisherige als auch der neue
+ * Zeitraum vollständig sind (Start UND Ende gesetzt) und sich das Datum nicht
+ * ändert - andernfalls (z.B. ein noch offener Eintrag bekommt erstmals eine
+ * Endzeit, oder der Eintrag wird auf einen anderen Tag verschoben) gibt es
+ * keine sinnvoll vergleichbare "alte" Zeitspanne, dann wird nur normal
+ * aktualisiert, ohne Leerlaufzeit anzulegen.
  */
 export async function updateManualTimeEntry(
-  original: TimeEntry,
+  original: Pick<TimeEntry, 'id' | 'date' | 'startTime' | 'endTime'>,
   payload: { date: string; startTime?: string; endTime?: string; note?: string }
 ): Promise<void> {
   await updateTimeEntry(original.id, payload);
@@ -322,6 +325,33 @@ export async function updateManualTimeEntry(
   for (const gap of gaps) {
     await addTimeEntry(undefined, { date: original.date, startTime: gap.start, endTime: gap.end });
   }
+}
+
+/**
+ * Aktualisiert einen in der Auswertung (Tag-Ansicht) bearbeiteten
+ * Leerlaufzeit-Eintrag. Kombiniert zwei Verhaltensweisen:
+ * - Überschneidet der NEUE Zeitraum einen ANDEREN bereits erfassten
+ *   Projekt-/Leerlaufzeit-/Pausen-Abschnitt (z.B. weil sich beim Eintippen
+ *   vertippt wurde), wird die überschneidende Zeit dort automatisch
+ *   herausgeschnitten (wie bei addManualIdleTime()) - schützt vor doppelter
+ *   Zählung. Der bearbeitete Eintrag selbst ist dabei bewusst von der
+ *   Überschneidungssuche ausgeschlossen (er überschneidet sich sonst mit
+ *   seinem eigenen alten Zeitraum).
+ * - Wird der abgedeckte Zeitraum gegenüber dem BISHERIGEN Wert dieses
+ *   Eintrags verkleinert oder verschoben, bleibt die dadurch freiwerdende
+ *   Zeit als eigener Leerlaufzeit-Eintrag erhalten (siehe
+ *   updateManualTimeEntry()) statt spurlos zu verschwinden.
+ */
+export async function updateManualIdleTime(
+  original: Pick<TimeEntry, 'id' | 'date' | 'startTime' | 'endTime'>,
+  date: string,
+  startTime: string,
+  endTime: string
+): Promise<void> {
+  if (!startTime || !endTime) return;
+  const overlaps = await findOverlappingTimeEntries(date, startTime, endTime, original.id);
+  await trimOverlappingTimeEntries(overlaps, startTime, endTime);
+  await updateManualTimeEntry(original, { date, startTime, endTime });
 }
 
 export interface StartProjectResult {
