@@ -85,6 +85,26 @@ export async function addManualBreak(date: string, startTime: string, endTime: s
 }
 
 /**
+ * Trägt Leerlaufzeit manuell für einen beliebigen (auch zurückliegenden) Tag
+ * nach - z.B. wenn vergessen wurde, ein- oder auszustempeln, und deshalb für
+ * einen Teil des Tages gar keine Zeit erfasst ist. Legt einfach einen ganz
+ * normalen Leerlaufzeit-Eintrag (reportId undefined) an, der sich danach wie
+ * jeder andere über "Leerlaufzeiten zuordnen" einem Projekt zuweisen lässt.
+ * Schneidet vorher wie beim manuellen Erfassen einer Zeit (siehe
+ * TimeEntrySection.svelte) und bei addManualBreak() zunächst eventuell
+ * überschneidende Projekt-/Leerlaufzeit-Einträge heraus, damit ein
+ * versehentlich überlappender Zeitraum nicht doppelt gezählt wird - im
+ * Normalfall (echte Erfassungslücke durch vergessenes Ein-/Ausstempeln) gibt
+ * es dort aber ohnehin nichts zu überschneiden.
+ */
+export async function addManualIdleTime(date: string, startTime: string, endTime: string): Promise<void> {
+  if (!startTime || !endTime) return;
+  const overlaps = await findOverlappingTimeEntries(date, startTime, endTime);
+  await trimOverlappingTimeEntries(overlaps, startTime, endTime);
+  await addTimeEntry(undefined, { date, startTime, endTime });
+}
+
+/**
  * Schließt den aktuell offenen Abschnitt (Leerlaufzeit oder Projekt),
  * schneidet optional erfasste Pausen heraus (siehe addManualBreak()) und
  * beendet den Tagesstempel. Gibt die Tageszusammenfassung zurück, oder

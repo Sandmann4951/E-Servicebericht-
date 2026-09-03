@@ -122,3 +122,29 @@ export async function getDayBreaks(date: ISODate): Promise<DayBreak[]> {
     .map((entry) => ({ id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 }))
     .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 }
+
+export interface DayIdleEntry {
+  id: ID;
+  startTime?: string;
+  endTime?: string;
+  minutes: number;
+}
+
+/**
+ * Die abgeschlossenen Leerlaufzeit-Abschnitte (kein Bericht, keine Pause)
+ * eines einzelnen Tages, nach Startzeit sortiert - Grundlage für die
+ * Leerlaufzeit-Liste in der Statistik-Tagesansicht. Zeigt sowohl über die
+ * Tagesstempeluhr entstandene als auch manuell nachgetragene Abschnitte
+ * (siehe clockActions.addManualIdleTime()) gleichermaßen an. Ein gerade noch
+ * laufender (offener) Leerlaufzeit-Abschnitt hat keine endTime/duration und
+ * wird bewusst ausgeschlossen - er gehört zum aktiven Tagesstempel, nicht zur
+ * nachträglichen Bearbeitung hier.
+ */
+export async function getDayIdleEntries(date: ISODate): Promise<DayIdleEntry[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'date', date);
+  return entries
+    .filter((entry) => !entry.reportId && !entry.isBreak && entry.endTime)
+    .map((entry) => ({ id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 }))
+    .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
+}

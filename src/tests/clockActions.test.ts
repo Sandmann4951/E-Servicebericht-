@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetTestDB } from './testUtils';
 import {
   addManualBreak,
+  addManualIdleTime,
   autoCheckOutIfExceeded,
   checkInDay,
   checkOutDay,
@@ -23,7 +24,7 @@ import {
   updateTimeEntry
 } from '../lib/db/timeEntries';
 import { checkInWorkDay, checkOutWorkDay, getActiveWorkDay } from '../lib/db/workDays';
-import { getDayBreaks } from '../lib/db/stats';
+import { getDayBreaks, getDayIdleEntries } from '../lib/db/stats';
 import { todayISODate } from '../lib/utils/date';
 
 beforeEach(async () => {
@@ -581,6 +582,54 @@ describe('addManualBreak (manuelles Nachtragen einer Pause, z.B. in der Auswertu
 
     expect(await listTimeEntries(report.id)).toHaveLength(1);
     expect(await getDayBreaks('2026-08-10')).toEqual([]);
+  });
+});
+
+describe('addManualIdleTime (manuelles Nachtragen von Leerlaufzeit, z.B. bei vergessenem Ein-/Ausstempeln)', () => {
+  it('legt für einen beliebigen Tag einen Leerlaufzeit-Eintrag an, ganz ohne aktiven Tagesstempel', async () => {
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+
+    const entries = await getDayIdleEntries('2026-08-10');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ startTime: '08:00', endTime: '10:00', minutes: 120 });
+  });
+
+  it('taucht danach wie jede andere Leerlaufzeit in listUnassignedIdleEntries auf und lässt sich zuordnen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addManualIdleTime('2026-08-10', '08:00', '10:00');
+
+    const [unassigned] = await listUnassignedIdleEntries();
+    expect(unassigned).toBeDefined();
+
+    await reassignIdleEntry(unassigned.id, report.id);
+
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
+    const updated = await getReport(report.id);
+    expect(updated?.totalDurationMinutes).toBe(120);
+  });
+
+  it('schneidet eine versehentlich überschneidende Projektzeit vorher heraus, statt sie doppelt zu zählen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+
+    await addManualIdleTime('2026-08-10', '10:00', '11:00');
+
+    const reportEntries = await listTimeEntries(report.id);
+    // Die 08:00-12:00 Projektzeit wurde um das überschneidende 10:00-11:00-Fenster gesplittet.
+    expect(reportEntries.map((e) => [e.startTime, e.endTime]).sort()).toEqual([
+      ['08:00', '10:00'],
+      ['11:00', '12:00']
+    ]);
+    const idle = await getDayIdleEntries('2026-08-10');
+    expect(idle).toHaveLength(1);
+    expect(idle[0]).toMatchObject({ startTime: '10:00', endTime: '11:00', minutes: 60 });
+  });
+
+  it('hat keinen Effekt, wenn Start- oder Endzeit fehlt', async () => {
+    await addManualIdleTime('2026-08-10', '', '12:30');
+    await addManualIdleTime('2026-08-10', '12:00', '');
+
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
   });
 });
 

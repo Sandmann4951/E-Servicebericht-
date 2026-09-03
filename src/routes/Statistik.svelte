@@ -1,7 +1,16 @@
 <script lang="ts">
-  import { getDayBreaks, getDayProjectBreakdown, getDayStats, type DayBreak, type DayProjectBreakdown, type DayStats } from '../lib/db/stats';
-  import { restoreBreak } from '../lib/db/timeEntries';
-  import { addManualBreak } from '../lib/clockActions';
+  import {
+    getDayBreaks,
+    getDayIdleEntries,
+    getDayProjectBreakdown,
+    getDayStats,
+    type DayBreak,
+    type DayIdleEntry,
+    type DayProjectBreakdown,
+    type DayStats
+  } from '../lib/db/stats';
+  import { deleteTimeEntry, restoreBreak } from '../lib/db/timeEntries';
+  import { addManualBreak, addManualIdleTime } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
   import type { Absence, AbsenceType, ID } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -86,6 +95,15 @@
   let addBreakStart = $state('');
   let addBreakEnd = $state('');
   let addingBreak = $state(false);
+  let dayIdleEntries = $state<DayIdleEntry[]>([]);
+  // Formular zum nachträglichen Eintragen von Leerlaufzeit für den in der
+  // Tag-Ansicht gewählten Tag - z.B. wenn vergessen wurde, ein- oder
+  // auszustempeln, und deshalb für einen Teil des Tages gar keine Zeit
+  // erfasst ist. Analog zum Pausen-Formular oben.
+  let addIdleFormOpen = $state(false);
+  let addIdleStart = $state('');
+  let addIdleEnd = $state('');
+  let addingIdle = $state(false);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -136,6 +154,9 @@
     getDayBreaks(selectedDate).then((result) => {
       dayBreaks = result;
     });
+    getDayIdleEntries(selectedDate).then((result) => {
+      dayIdleEntries = result;
+    });
   });
 
   async function removeBreak(breakId: string): Promise<void> {
@@ -177,6 +198,43 @@
       await load();
     } finally {
       addingBreak = false;
+    }
+  }
+
+  async function removeIdleEntry(entryId: string): Promise<void> {
+    if (!confirm('Leerlaufzeit löschen?')) return;
+    await deleteTimeEntry(entryId);
+    dayIdleEntries = await getDayIdleEntries(selectedDate);
+    await load();
+  }
+
+  function openAddIdleForm(): void {
+    addIdleStart = '';
+    addIdleEnd = '';
+    addIdleFormOpen = true;
+  }
+
+  function closeAddIdleForm(): void {
+    addIdleFormOpen = false;
+  }
+
+  /**
+   * Trägt Leerlaufzeit manuell nach - unabhängig von der Tagesstempeluhr,
+   * für einen beliebigen (auch zurückliegenden) Tag. Für den Fall, dass
+   * vergessen wurde, ein- oder auszustempeln, und deshalb für einen Teil des
+   * Tages gar keine Zeit erfasst wurde (siehe addManualIdleTime() in
+   * clockActions.ts).
+   */
+  async function submitAddIdle(): Promise<void> {
+    if (!addIdleStart || !addIdleEnd || addingIdle) return;
+    addingIdle = true;
+    try {
+      await addManualIdleTime(selectedDate, addIdleStart, addIdleEnd);
+      addIdleFormOpen = false;
+      dayIdleEntries = await getDayIdleEntries(selectedDate);
+      await load();
+    } finally {
+      addingIdle = false;
     }
   }
 
@@ -500,14 +558,47 @@
       {/if}
 
       <div class="projects">
+        <p class="section-title">Leerlaufzeit</p>
+        {#if dayIdleEntries.length > 0}
+          <ul class="breakdown">
+            {#each dayIdleEntries as entry (entry.id)}
+              <li class="time-entry-row">
+                <span class="breakdown-label plain">{entry.startTime}–{entry.endTime} Uhr</span>
+                <span class="breakdown-values"><span class="idle">{formatDurationMinutes(entry.minutes)}</span></span>
+                <button type="button" class="remove-entry" onclick={() => removeIdleEntry(entry.id)} aria-label="Leerlaufzeit löschen">
+                  <Icon name="trash" size={16} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        {#if addIdleFormOpen}
+          <div class="add-entry-form">
+            <div class="entry-time-row">
+              <input type="time" bind:value={addIdleStart} aria-label="Leerlaufzeit von" />
+              <span>–</span>
+              <input type="time" bind:value={addIdleEnd} aria-label="Leerlaufzeit bis" />
+            </div>
+            <div class="add-entry-actions">
+              <button type="button" class="cancel" onclick={closeAddIdleForm}>Abbrechen</button>
+              <button type="button" class="primary" onclick={submitAddIdle} disabled={addingIdle}>Speichern</button>
+            </div>
+          </div>
+        {:else}
+          <button type="button" class="add-entry-toggle" onclick={openAddIdleForm}>+ Leerlaufzeit hinzufügen</button>
+        {/if}
+      </div>
+
+      <div class="projects">
         <p class="section-title">Pausen</p>
         {#if dayBreaks.length > 0}
           <ul class="breakdown">
             {#each dayBreaks as brk (brk.id)}
-              <li class="break-entry">
+              <li class="time-entry-row">
                 <span class="breakdown-label plain">{brk.startTime}–{brk.endTime} Uhr</span>
                 <span class="breakdown-values"><span class="idle">{formatDurationMinutes(brk.minutes)}</span></span>
-                <button type="button" class="remove-break-entry" onclick={() => removeBreak(brk.id)} aria-label="Pause löschen">
+                <button type="button" class="remove-entry" onclick={() => removeBreak(brk.id)} aria-label="Pause löschen">
                   <Icon name="trash" size={16} />
                 </button>
               </li>
@@ -516,19 +607,19 @@
         {/if}
 
         {#if addBreakFormOpen}
-          <div class="add-break-form">
-            <div class="break-row">
+          <div class="add-entry-form">
+            <div class="entry-time-row">
               <input type="time" bind:value={addBreakStart} aria-label="Pause von" />
               <span>–</span>
               <input type="time" bind:value={addBreakEnd} aria-label="Pause bis" />
             </div>
-            <div class="add-break-actions">
+            <div class="add-entry-actions">
               <button type="button" class="cancel" onclick={closeAddBreakForm}>Abbrechen</button>
               <button type="button" class="primary" onclick={submitAddBreak} disabled={addingBreak}>Speichern</button>
             </div>
           </div>
         {:else}
-          <button type="button" class="add-break-toggle" onclick={openAddBreakForm}>+ Pause hinzufügen</button>
+          <button type="button" class="add-entry-toggle" onclick={openAddBreakForm}>+ Pause hinzufügen</button>
         {/if}
       </div>
     {:else if view === 'monat'}
@@ -1134,7 +1225,7 @@
     vertical-align: -2px;
   }
 
-  .break-entry {
+  .time-entry-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1145,7 +1236,7 @@
     padding: var(--space-3);
   }
 
-  .remove-break-entry {
+  .remove-entry {
     background: transparent;
     border: none;
     color: var(--color-danger);
@@ -1153,7 +1244,7 @@
     min-height: auto;
   }
 
-  .add-break-toggle {
+  .add-entry-toggle {
     align-self: flex-start;
     background: transparent;
     border: 1px dashed var(--color-primary);
@@ -1165,7 +1256,7 @@
     font-weight: 600;
   }
 
-  .add-break-form {
+  .add-entry-form {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -1175,27 +1266,27 @@
     padding: var(--space-3);
   }
 
-  .break-row {
+  .entry-time-row {
     display: flex;
     align-items: center;
     gap: var(--space-2);
   }
 
-  .break-row input {
+  .entry-time-row input {
     flex: 1;
   }
 
-  .break-row span {
+  .entry-time-row span {
     color: var(--color-text-muted);
   }
 
-  .add-break-actions {
+  .add-entry-actions {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
   }
 
-  .add-break-actions .cancel {
+  .add-entry-actions .cancel {
     background: transparent;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -1203,7 +1294,7 @@
     min-height: auto;
   }
 
-  .add-break-actions .primary {
+  .add-entry-actions .primary {
     background: var(--color-primary);
     color: var(--color-primary-contrast);
     border: none;

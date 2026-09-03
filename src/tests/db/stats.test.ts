@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
-import { getDayBreaks, getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
+import { getDayBreaks, getDayIdleEntries, getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -100,6 +100,33 @@ describe('getDayBreaks', () => {
       ['10:00', '10:15', 15],
       ['12:00', '12:30', 30]
     ]);
+  });
+});
+
+describe('getDayIdleEntries', () => {
+  it('liefert eine leere Liste ohne Leerlaufzeit an dem Tag', async () => {
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
+  });
+
+  it('liefert nur abgeschlossene Leerlaufzeit-Abschnitte (kein Bericht, keine Pause), nach Startzeit sortiert', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' }); // Projektzeit, keine Leerlaufzeit
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '12:00', endTime: '12:30', isBreak: true }); // Pause, keine Leerlaufzeit
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '14:00', endTime: '15:00' });
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '10:00', endTime: '10:15' });
+
+    const entries = await getDayIdleEntries('2026-08-10');
+
+    expect(entries.map((e) => [e.startTime, e.endTime, e.minutes])).toEqual([
+      ['10:00', '10:15', 15],
+      ['14:00', '15:00', 60]
+    ]);
+  });
+
+  it('schließt einen noch offenen (laufenden) Leerlaufzeit-Abschnitt ohne Endzeit aus', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00' });
+
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
   });
 });
 
