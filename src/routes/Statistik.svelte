@@ -1,13 +1,11 @@
 <script lang="ts">
   import {
-    getDayBreaks,
-    getDayIdleEntries,
     getDayProjectBreakdown,
     getDayStats,
-    type DayBreak,
-    type DayIdleEntry,
+    getDayTimeline,
     type DayProjectBreakdown,
-    type DayStats
+    type DayStats,
+    type DayTimelineEntry
   } from '../lib/db/stats';
   import { deleteTimeEntry, restoreBreak } from '../lib/db/timeEntries';
   import { addManualBreak, addManualIdleTime, updateManualIdleTime } from '../lib/clockActions';
@@ -86,8 +84,11 @@
   let dayStats = $state<DayStats[]>([]);
   let loading = $state(true);
   let view = $state<View>('monat');
-  let projectBreakdown = $state<DayProjectBreakdown[]>([]);
-  let dayBreaks = $state<DayBreak[]>([]);
+  // Chronologischer Zeitverlauf des in der Tag-Ansicht gewählten Tages -
+  // Projekt-, Leerlaufzeit- und Pausen-Abschnitte gemeinsam nach Startzeit
+  // sortiert (siehe getDayTimeline() in db/stats.ts), statt nach Kategorie
+  // gruppiert. Farblich nach `kind` unterschieden (s. Markup/CSS unten).
+  let dayTimeline = $state<DayTimelineEntry[]>([]);
   // Formular zum nachträglichen Eintragen einer Pause für den in der
   // Tag-Ansicht gewählten Tag (unabhängig vom Tagesausstempeln - z.B. für
   // eine vergessene Pause oder einen zurückliegenden Tag).
@@ -95,7 +96,6 @@
   let addBreakStart = $state('');
   let addBreakEnd = $state('');
   let addingBreak = $state(false);
-  let dayIdleEntries = $state<DayIdleEntry[]>([]);
   // Formular zum nachträglichen Eintragen von Leerlaufzeit für den in der
   // Tag-Ansicht gewählten Tag - z.B. wenn vergessen wurde, ein- oder
   // auszustempeln, und deshalb für einen Teil des Tages gar keine Zeit
@@ -105,9 +105,11 @@
   let addIdleEnd = $state('');
   let addingIdle = $state(false);
   // Gesetzt, während das Formular oben einen BESTEHENDEN Leerlaufzeit-
-  // Eintrag bearbeitet statt einen neuen anzulegen (Klick auf eine Zeile in
-  // der Leerlaufzeit-Liste) - submitAddIdle() unterscheidet danach.
-  let editingIdleEntry = $state<DayIdleEntry | undefined>(undefined);
+  // Eintrag im Zeitverlauf bearbeitet statt einen neuen anzulegen (Klick auf
+  // einen Leerlaufzeit-Eintrag) - submitAddIdle() unterscheidet danach. Nur
+  // die tatsächlich benötigten Felder (wie bei updateManualTimeEntry() in
+  // clockActions.ts), ein DayTimelineEntry erfüllt das strukturell mit.
+  let editingIdleEntry = $state<{ id: ID; startTime?: string; endTime?: string } | undefined>(undefined);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -122,12 +124,11 @@
   // wieder zu.
   let selectedCalendarDate = $state<string | undefined>(undefined);
   let calendarDayBreakdown = $state<DayProjectBreakdown[]>([]);
-  // Welche Projekt-Zeilen der Projekt-Aufschlüsselung gerade aufgeklappt sind
-  // (zeigt dann die einzelnen gestempelten Zeitabschnitte statt nur der
-  // Summe) - getrennt für Tag-Ansicht und Kalender-Tagespanel, da beide
-  // gleichzeitig offen sein können (Kalender → "Vollständige Tagesansicht
-  // öffnen" wechselt in die Tag-Ansicht, ohne das Kalender-Panel zu schließen).
-  const expandedProjects = new SvelteSet<ID>();
+  // Welche Projekt-Zeilen der Projekt-Aufschlüsselung im Kalender-Tagespanel
+  // gerade aufgeklappt sind (zeigt dann die einzelnen gestempelten
+  // Zeitabschnitte statt nur der Summe) - die Tag-Ansicht selbst braucht das
+  // nicht mehr, dort steht ohnehin schon jeder einzelne Abschnitt chronologisch
+  // im Zeitverlauf (siehe dayTimeline oben).
   const expandedCalendarProjects = new SvelteSet<ID>();
 
   const today = todayISODate();
@@ -146,21 +147,18 @@
     load();
   });
 
-  // Lädt die Projekt-Aufschlüsselung neu, sobald die Tag-Ansicht aktiv ist
-  // oder sich das gewählte Datum ändert - unabhängig davon, ob man über den
-  // "Tag"-Reiter direkt oder per Antippen einer Tages-Zeile aus der
-  // Monatsansicht (openDay) dorthin gelangt ist.
+  /** Lädt den Zeitverlauf (siehe dayTimeline oben) für den gewählten Tag neu. */
+  async function reloadDayTimeline(): Promise<void> {
+    dayTimeline = await getDayTimeline(selectedDate);
+  }
+
+  // Lädt den Zeitverlauf neu, sobald die Tag-Ansicht aktiv ist oder sich das
+  // gewählte Datum ändert - unabhängig davon, ob man über den "Tag"-Reiter
+  // direkt oder per Antippen einer Tages-Zeile aus der Monatsansicht
+  // (openDay) dorthin gelangt ist.
   $effect(() => {
     if (view !== 'tag') return;
-    getDayProjectBreakdown(selectedDate).then((result) => {
-      projectBreakdown = result;
-    });
-    getDayBreaks(selectedDate).then((result) => {
-      dayBreaks = result;
-    });
-    getDayIdleEntries(selectedDate).then((result) => {
-      dayIdleEntries = result;
-    });
+    void reloadDayTimeline();
   });
 
   async function removeBreak(breakId: string): Promise<void> {
@@ -171,7 +169,7 @@
     // ursprünglich abgezogen wurde.
     if (!confirm('Pause löschen? Die dadurch abgezogene Zeit wird dem Projekt/der Leerlaufzeit wieder gutgeschrieben.')) return;
     await restoreBreak(breakId);
-    dayBreaks = await getDayBreaks(selectedDate);
+    await reloadDayTimeline();
     await load();
   }
 
@@ -198,7 +196,7 @@
     try {
       await addManualBreak(selectedDate, addBreakStart, addBreakEnd);
       addBreakFormOpen = false;
-      dayBreaks = await getDayBreaks(selectedDate);
+      await reloadDayTimeline();
       await load();
     } finally {
       addingBreak = false;
@@ -208,7 +206,7 @@
   async function removeIdleEntry(entryId: string): Promise<void> {
     if (!confirm('Leerlaufzeit löschen?')) return;
     await deleteTimeEntry(entryId);
-    dayIdleEntries = await getDayIdleEntries(selectedDate);
+    await reloadDayTimeline();
     await load();
   }
 
@@ -220,7 +218,7 @@
   }
 
   /** Öffnet dasselbe Formular im Bearbeiten-Modus, vorausgefüllt mit den bisherigen Zeiten des angetippten Eintrags. */
-  function startEditIdle(entry: DayIdleEntry): void {
+  function startEditIdle(entry: DayTimelineEntry): void {
     editingIdleEntry = entry;
     addIdleStart = entry.startTime ?? '';
     addIdleEnd = entry.endTime ?? '';
@@ -259,7 +257,7 @@
       }
       addIdleFormOpen = false;
       editingIdleEntry = undefined;
-      dayIdleEntries = await getDayIdleEntries(selectedDate);
+      await reloadDayTimeline();
       await load();
     } finally {
       addingIdle = false;
@@ -574,83 +572,75 @@
         <p class="empty">Keine Zeiten erfasst für diesen Tag.</p>
       {:else}
         {@render statsCardSnippet(dayStat)}
-
-        {#if projectBreakdown.length > 0}
-          <div class="projects">
-            <p class="section-title">Projekte an diesem Tag</p>
-            {@render projectBreakdownSnippet(projectBreakdown, expandedProjects)}
-          </div>
-        {:else if dayStat.productiveMinutes === 0}
-          <p class="hint">Nur Leerlaufzeit an diesem Tag, keine Projektzeiten.</p>
-        {/if}
       {/if}
 
       <div class="projects">
-        <p class="section-title">Leerlaufzeit</p>
-        {#if dayIdleEntries.length > 0}
+        <p class="section-title">Zeitverlauf</p>
+        {#if dayTimeline.length > 0}
           <ul class="breakdown">
-            {#each dayIdleEntries as entry (entry.id)}
-              <li class="time-entry-row">
-                <button type="button" class="entry-main" onclick={() => startEditIdle(entry)}>
-                  <span class="breakdown-label plain">{entry.startTime}–{entry.endTime} Uhr</span>
-                  <span class="breakdown-values"><span class="idle">{formatDurationMinutes(entry.minutes)}</span></span>
-                </button>
-                <button type="button" class="remove-entry" onclick={() => removeIdleEntry(entry.id)} aria-label="Leerlaufzeit löschen">
-                  <Icon name="trash" size={16} />
-                </button>
+            {#each dayTimeline as entry (entry.id)}
+              {@const exceedsMax = exceedsMaxDailyWork(entry.minutes)}
+              <li class="timeline-row kind-{entry.kind}" class:exceeds-max={exceedsMax}>
+                {#if entry.kind === 'project'}
+                  <button type="button" class="entry-main" onclick={() => navigate(`/reports/${entry.reportId}`)}>
+                    {@render timelineRowContentSnippet(entry, exceedsMax)}
+                  </button>
+                {:else if entry.kind === 'idle'}
+                  <button type="button" class="entry-main" onclick={() => startEditIdle(entry)}>
+                    {@render timelineRowContentSnippet(entry, exceedsMax)}
+                  </button>
+                {:else}
+                  <div class="entry-main static">
+                    {@render timelineRowContentSnippet(entry, exceedsMax)}
+                  </div>
+                {/if}
+                {#if entry.kind === 'idle'}
+                  <button type="button" class="remove-entry" onclick={() => removeIdleEntry(entry.id)} aria-label="Leerlaufzeit löschen">
+                    <Icon name="trash" size={16} />
+                  </button>
+                {:else if entry.kind === 'break'}
+                  <button type="button" class="remove-entry" onclick={() => removeBreak(entry.id)} aria-label="Pause löschen">
+                    <Icon name="trash" size={16} />
+                  </button>
+                {/if}
               </li>
             {/each}
           </ul>
         {/if}
 
-        {#if addIdleFormOpen}
-          <div class="add-entry-form">
-            <div class="entry-time-row">
-              <input type="time" bind:value={addIdleStart} aria-label="Leerlaufzeit von" />
-              <span>–</span>
-              <input type="time" bind:value={addIdleEnd} aria-label="Leerlaufzeit bis" />
+        <div class="timeline-add-actions">
+          {#if addIdleFormOpen}
+            <div class="add-entry-form">
+              <div class="entry-time-row">
+                <input type="time" bind:value={addIdleStart} aria-label="Leerlaufzeit von" />
+                <span>–</span>
+                <input type="time" bind:value={addIdleEnd} aria-label="Leerlaufzeit bis" />
+              </div>
+              <div class="add-entry-actions">
+                <button type="button" class="cancel" onclick={closeAddIdleForm}>Abbrechen</button>
+                <button type="button" class="primary" onclick={submitAddIdle} disabled={addingIdle}>Speichern</button>
+              </div>
             </div>
-            <div class="add-entry-actions">
-              <button type="button" class="cancel" onclick={closeAddIdleForm}>Abbrechen</button>
-              <button type="button" class="primary" onclick={submitAddIdle} disabled={addingIdle}>Speichern</button>
-            </div>
-          </div>
-        {:else}
-          <button type="button" class="add-entry-toggle" onclick={openAddIdleForm}>+ Leerlaufzeit hinzufügen</button>
-        {/if}
-      </div>
+          {:else}
+            <button type="button" class="add-entry-toggle" onclick={openAddIdleForm}>+ Leerlaufzeit hinzufügen</button>
+          {/if}
 
-      <div class="projects">
-        <p class="section-title">Pausen</p>
-        {#if dayBreaks.length > 0}
-          <ul class="breakdown">
-            {#each dayBreaks as brk (brk.id)}
-              <li class="time-entry-row">
-                <span class="breakdown-label plain">{brk.startTime}–{brk.endTime} Uhr</span>
-                <span class="breakdown-values"><span class="idle">{formatDurationMinutes(brk.minutes)}</span></span>
-                <button type="button" class="remove-entry" onclick={() => removeBreak(brk.id)} aria-label="Pause löschen">
-                  <Icon name="trash" size={16} />
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-
-        {#if addBreakFormOpen}
-          <div class="add-entry-form">
-            <div class="entry-time-row">
-              <input type="time" bind:value={addBreakStart} aria-label="Pause von" />
-              <span>–</span>
-              <input type="time" bind:value={addBreakEnd} aria-label="Pause bis" />
+          {#if addBreakFormOpen}
+            <div class="add-entry-form">
+              <div class="entry-time-row">
+                <input type="time" bind:value={addBreakStart} aria-label="Pause von" />
+                <span>–</span>
+                <input type="time" bind:value={addBreakEnd} aria-label="Pause bis" />
+              </div>
+              <div class="add-entry-actions">
+                <button type="button" class="cancel" onclick={closeAddBreakForm}>Abbrechen</button>
+                <button type="button" class="primary" onclick={submitAddBreak} disabled={addingBreak}>Speichern</button>
+              </div>
             </div>
-            <div class="add-entry-actions">
-              <button type="button" class="cancel" onclick={closeAddBreakForm}>Abbrechen</button>
-              <button type="button" class="primary" onclick={submitAddBreak} disabled={addingBreak}>Speichern</button>
-            </div>
-          </div>
-        {:else}
-          <button type="button" class="add-entry-toggle" onclick={openAddBreakForm}>+ Pause hinzufügen</button>
-        {/if}
+          {:else}
+            <button type="button" class="add-entry-toggle" onclick={openAddBreakForm}>+ Pause hinzufügen</button>
+          {/if}
+        </div>
       </div>
     {:else if view === 'monat'}
       <div class="nav">
@@ -918,6 +908,29 @@
     </div>
     <p class="split-caption">{productivePercent(stats)}% produktiv</p>
   </div>
+{/snippet}
+
+{#snippet timelineRowContentSnippet(entry: DayTimelineEntry, exceedsMax: boolean)}
+  <span class="timeline-info">
+    <span class="timeline-time">
+      {entry.startTime}–{entry.endTime} Uhr
+      {#if exceedsMax}
+        <span class="max-hint" title="Überschreitet die gesetzliche Höchstarbeitszeit (10 Std./Tag) - bitte prüfen.">
+          <Icon name="alert-triangle" size={13} />
+        </span>
+      {/if}
+    </span>
+    <span class="timeline-label">
+      {#if entry.kind === 'project'}
+        {entry.projectNumber}{#if entry.customer} · {entry.customer}{/if}
+      {:else if entry.kind === 'idle'}
+        Leerlaufzeit
+      {:else}
+        Pause
+      {/if}
+    </span>
+  </span>
+  <span class="timeline-duration kind-{entry.kind}">{formatDurationMinutes(entry.minutes)}</span>
 {/snippet}
 
 {#snippet projectBreakdownSnippet(breakdown: DayProjectBreakdown[], expanded: Set<ID>)}
@@ -1255,15 +1268,83 @@
     vertical-align: -2px;
   }
 
-  .time-entry-row {
+  /* Ein Zeitverlauf-Eintrag (Projekt/Leerlaufzeit/Pause chronologisch
+     gemischt) - Karte im gewohnten Look (Fläche/Rahmen/Radius/Padding), plus
+     ein farbiger linker Rahmen je nach Art (kind), damit sich die drei Arten auf einen
+     Blick unterscheiden lassen, ohne die Zeile extra lesen zu müssen.
+     Selektor bewusst "li.timeline-row" (Element + Klasse) statt nur der
+     Klasse: ".breakdown > li" weiter oben setzt flex-direction:column mit
+     dann höherer bzw. gleicher Spezifität - erst durch denselben
+     Spezifitäts-Level ("li" + Klasse) gewinnt hier die spätere Regel
+     (flex-direction: row) zuverlässig über die Kaskaden-Reihenfolge. */
+  li.timeline-row {
     display: flex;
+    flex-direction: row;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
     background: var(--color-surface);
     border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-border);
     border-radius: var(--radius-md);
     padding: var(--space-3);
+  }
+
+  .timeline-row.kind-project {
+    border-left-color: var(--color-completed);
+  }
+
+  .timeline-row.kind-idle {
+    border-left-color: var(--color-open);
+  }
+
+  .timeline-row.kind-break {
+    border-left-color: var(--color-timeoff);
+  }
+
+  .timeline-row.exceeds-max {
+    background: var(--color-danger-bg);
+    border-left-color: var(--color-danger);
+  }
+
+  .timeline-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+  }
+
+  .timeline-time {
+    font-weight: 600;
+  }
+
+  .timeline-label {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+  }
+
+  .timeline-duration {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .timeline-duration.kind-project {
+    color: var(--color-completed);
+  }
+
+  .timeline-duration.kind-idle {
+    color: var(--color-open);
+  }
+
+  .timeline-duration.kind-break {
+    color: var(--color-timeoff);
+  }
+
+  .timeline-add-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
   }
 
   .entry-main {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
 import { createReport } from '../../lib/db/reports';
 import { addTimeEntry } from '../../lib/db/timeEntries';
-import { getDayBreaks, getDayIdleEntries, getDayProjectBreakdown, getDayStats } from '../../lib/db/stats';
+import { getDayBreaks, getDayIdleEntries, getDayProjectBreakdown, getDayStats, getDayTimeline } from '../../lib/db/stats';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -127,6 +127,35 @@ describe('getDayIdleEntries', () => {
     await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00' });
 
     expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
+  });
+});
+
+describe('getDayTimeline', () => {
+  it('liefert eine leere Liste ohne Zeiteinträge an dem Tag', async () => {
+    expect(await getDayTimeline('2026-08-10')).toEqual([]);
+  });
+
+  it('mischt Projekt-, Leerlaufzeit- und Pausen-Abschnitte in EINER chronologischen Liste', async () => {
+    const report = await createReport({ projectNumber: 'A', customer: 'Müller GmbH' });
+    // Bewusst in nicht-chronologischer Anlege-Reihenfolge, um die Sortierung zu prüfen.
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '10:00', endTime: '12:00' });
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '10:00' });
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '12:00', endTime: '12:30', isBreak: true });
+
+    const timeline = await getDayTimeline('2026-08-10');
+
+    expect(timeline.map((e) => [e.kind, e.startTime, e.endTime, e.minutes])).toEqual([
+      ['idle', '08:00', '10:00', 120],
+      ['project', '10:00', '12:00', 120],
+      ['break', '12:00', '12:30', 30]
+    ]);
+    expect(timeline[1]).toMatchObject({ reportId: report.id, projectNumber: 'A', customer: 'Müller GmbH' });
+  });
+
+  it('schließt einen noch offenen (laufenden) Abschnitt ohne Endzeit aus', async () => {
+    await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00' });
+
+    expect(await getDayTimeline('2026-08-10')).toEqual([]);
   });
 });
 

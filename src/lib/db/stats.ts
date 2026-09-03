@@ -148,3 +148,56 @@ export async function getDayIdleEntries(date: ISODate): Promise<DayIdleEntry[]> 
     .map((entry) => ({ id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 }))
     .sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
 }
+
+export interface DayTimelineEntry {
+  id: ID;
+  kind: 'project' | 'idle' | 'break';
+  startTime?: string;
+  endTime?: string;
+  minutes: number;
+  /** Nur bei kind === 'project' gesetzt. */
+  reportId?: ID;
+  projectNumber?: string;
+  customer?: string;
+}
+
+/**
+ * ALLE abgeschlossenen Zeitabschnitte eines einzelnen Tages (Projekt,
+ * Leerlaufzeit und Pause gleichermaßen) in EINER chronologischen Liste,
+ * nach Startzeit sortiert - Grundlage für den Zeitverlauf in der
+ * Statistik-Tagesansicht. Löst dort die frühere getrennte Darstellung
+ * (Projekt-Aufschlüsselung nach Bericht gruppiert, Leerlaufzeit- und
+ * Pausen-Liste separat) ab: so lässt sich auf einen Blick nachvollziehen,
+ * was an diesem Tag WANN passiert ist (z.B. "erst Leerlaufzeit, dann
+ * Projekt X, dann Pause, dann wieder Leerlaufzeit"), statt die Zeiten nach
+ * Kategorie sortiert lesen zu müssen. Ein gerade noch laufender (offener)
+ * Abschnitt hat keine endTime/duration und wird bewusst ausgeschlossen -
+ * er gehört zum aktiven Tagesstempel, nicht zur nachträglichen Bearbeitung.
+ */
+export async function getDayTimeline(date: ISODate): Promise<DayTimelineEntry[]> {
+  const db = await getDB();
+  const entries = await db.getAllFromIndex('timeEntries', 'date', date);
+  const withDuration = entries.filter((entry) => entry.durationMinutes && entry.startTime && entry.endTime);
+
+  const timeline = await Promise.all(
+    withDuration.map(async (entry): Promise<DayTimelineEntry> => {
+      const base = { id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 };
+      if (entry.isBreak) {
+        return { ...base, kind: 'break' };
+      }
+      if (entry.reportId) {
+        const report = await db.get('reports', entry.reportId);
+        return {
+          ...base,
+          kind: 'project',
+          reportId: entry.reportId,
+          projectNumber: report?.projectNumber ?? 'Unbekannter Bericht',
+          customer: report?.customer
+        };
+      }
+      return { ...base, kind: 'idle' };
+    })
+  );
+
+  return timeline.sort((a, b) => (a.startTime ?? '').localeCompare(b.startTime ?? ''));
+}
