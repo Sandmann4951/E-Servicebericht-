@@ -42,7 +42,33 @@ export default defineConfig(() => ({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}']
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // Die selbst gehosteten OCR-Dateien (Tesseract-Worker/WASM-Kern unter
+        // public/tesseract/, deutsche Trainingsdaten unter public/tessdata/ -
+        // siehe BarcodeScanner.svelte "Etikett-Text"-Modus) sind bewusst NICHT
+        // im normalen Precache: mehrere MB nur für ein Feature, das nicht
+        // jeder Nutzer verwendet, würde die Erstinstallation unnötig
+        // aufblähen. .wasm/.gz matchen globPatterns oben ohnehin nicht, aber
+        // die kleinen .js-Dateien (worker.min.js, tesseract-core-lstm.js)
+        // würden über das "**/*.js"-Muster sonst versehentlich mit
+        // precacht werden - deshalb hier zusätzlich per globIgnores explizit
+        // ausgeschlossen. Stattdessen werden alle OCR-Dateien beim ersten
+        // tatsächlichen Etikett-Text-Scan ganz normal per HTTP geladen und ab
+        // da per Workbox CacheFirst dauerhaft im Service Worker
+        // zwischengespeichert - danach funktioniert auch dieses Feature
+        // komplett offline, ohne die App insgesamt größer zu machen.
+        globIgnores: ['tesseract/**', 'tessdata/**'],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.includes('/tesseract/') || url.pathname.includes('/tessdata/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ocr-assets',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          }
+        ]
       },
       devOptions: {
         enabled: true,

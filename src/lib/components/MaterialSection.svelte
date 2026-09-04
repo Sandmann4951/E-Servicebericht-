@@ -3,6 +3,7 @@
   import type { MaterialItem } from '../db/types';
   import { STANDARD_MATERIALS } from '../materialCatalog';
   import { parseScannedMaterialLabel } from '../utils/materialScan';
+  import { parseLabelText } from '../utils/labelOcr';
   import Icon from './Icon.svelte';
   import BarcodeScanner from './BarcodeScanner.svelte';
 
@@ -89,6 +90,26 @@
     scannerOpen = false;
     const parsed = parseScannedMaterialLabel(rawText);
     resetForm();
+    if (parsed.articleNumber) formArticleNumber = parsed.articleNumber;
+    if (parsed.quantity !== undefined) formQuantity = String(parsed.quantity);
+    lastScanRaw = parsed.raw;
+    showForm = true;
+  }
+
+  /**
+   * Übernimmt das Ergebnis der Etikett-Text-Erkennung (OCR, siehe
+   * BarcodeScanner.svelte "Etikett-Text"-Modus) in ein neues Formular -
+   * anders als beim reinen Code-Scan (handleScanResult()) steht auf dem
+   * Etikett gedruckter Text häufig auch die Beschreibung, daher füllt
+   * parseLabelText() hier zusätzlich formDescription, sofern erkannt. OCR
+   * ist fehleranfälliger als ein exakt dekodierter Code - alle Felder
+   * bleiben deshalb genauso editierbar wie beim Code-Scan.
+   */
+  function handleOcrResult(rawText: string): void {
+    scannerOpen = false;
+    const parsed = parseLabelText(rawText);
+    resetForm();
+    if (parsed.description) formDescription = parsed.description;
     if (parsed.articleNumber) formArticleNumber = parsed.articleNumber;
     if (parsed.quantity !== undefined) formQuantity = String(parsed.quantity);
     lastScanRaw = parsed.raw;
@@ -213,7 +234,11 @@
       </label>
       {#if lastScanRaw}
         <p class="scan-hint">
-          Aus Scan übernommen (Bezeichnung bitte vom Etikett abtippen): <span>{lastScanRaw}</span>
+          {#if formDescription}
+            Aus Scan übernommen (bitte prüfen): <span>{lastScanRaw}</span>
+          {:else}
+            Aus Scan übernommen (Bezeichnung bitte vom Etikett abtippen): <span>{lastScanRaw}</span>
+          {/if}
         </p>
       {/if}
       <div class="form-actions">
@@ -233,7 +258,7 @@
 </div>
 
 {#if scannerOpen}
-  <BarcodeScanner onScan={handleScanResult} onClose={() => (scannerOpen = false)} />
+  <BarcodeScanner onScan={handleScanResult} onOcrText={handleOcrResult} onClose={() => (scannerOpen = false)} />
 {/if}
 
 <style>
