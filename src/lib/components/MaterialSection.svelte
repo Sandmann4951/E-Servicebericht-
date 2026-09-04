@@ -2,7 +2,9 @@
   import { addMaterialItem, deleteMaterialItem, listMaterialItems, updateMaterialItem } from '../db/materialItems';
   import type { MaterialItem } from '../db/types';
   import { STANDARD_MATERIALS } from '../materialCatalog';
+  import { parseScannedMaterialLabel } from '../utils/materialScan';
   import Icon from './Icon.svelte';
+  import BarcodeScanner from './BarcodeScanner.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
@@ -20,6 +22,13 @@
   let formQuantity = $state('1');
   let formUnit = $state('Stk');
   let formArticleNumber = $state('');
+
+  let scannerOpen = $state(false);
+  // Rohtext des zuletzt gescannten Codes, solange das Formular dadurch
+  // vorausgefüllt wurde - wird als Hinweis unter dem Formular angezeigt,
+  // damit die Bezeichnung (die ein Barcode i.d.R. nicht enthält, siehe
+  // parseScannedMaterialLabel()) leicht vom Etikett abgetippt werden kann.
+  let lastScanRaw = $state<string | undefined>();
 
   async function load(): Promise<void> {
     loading = true;
@@ -44,6 +53,7 @@
     editingId = undefined;
     showForm = false;
     unitTouched = false;
+    lastScanRaw = undefined;
   }
 
   function startAdd(): void {
@@ -58,6 +68,30 @@
     formUnit = item.unit;
     formArticleNumber = item.articleNumber ?? '';
     unitTouched = true; // Einheit eines bestehenden Eintrags nicht durch Katalog-Match überschreiben.
+    lastScanRaw = undefined;
+    showForm = true;
+  }
+
+  function openScanner(): void {
+    scannerOpen = true;
+  }
+
+  /**
+   * Übernimmt das Scan-Ergebnis des Lieferanten-Etiketts (z.B. Sonepar) in
+   * ein neues Formular - Artikelnummer und Menge werden automatisch
+   * vorausgefüllt, sofern der Code sie enthielt (siehe
+   * parseScannedMaterialLabel()); die Bezeichnung bleibt bewusst leer zum
+   * Abtippen vom Etikett, da Barcodes/QR-Codes so gut wie nie Freitext
+   * transportieren. Alle Felder bleiben wie gewohnt editierbar, bevor
+   * gespeichert wird.
+   */
+  function handleScanResult(rawText: string): void {
+    scannerOpen = false;
+    const parsed = parseScannedMaterialLabel(rawText);
+    resetForm();
+    if (parsed.articleNumber) formArticleNumber = parsed.articleNumber;
+    if (parsed.quantity !== undefined) formQuantity = String(parsed.quantity);
+    lastScanRaw = parsed.raw;
     showForm = true;
   }
 
@@ -177,15 +211,30 @@
         Artikelnummer (optional)
         <input type="text" bind:value={formArticleNumber} />
       </label>
+      {#if lastScanRaw}
+        <p class="scan-hint">
+          Aus Scan übernommen (Bezeichnung bitte vom Etikett abtippen): <span>{lastScanRaw}</span>
+        </p>
+      {/if}
       <div class="form-actions">
         <button type="button" class="ghost" onclick={resetForm}>Abbrechen</button>
         <button type="submit" class="primary">Speichern</button>
       </div>
     </form>
   {:else}
-    <button type="button" class="add" onclick={startAdd}>+ Position hinzufügen</button>
+    <div class="add-row">
+      <button type="button" class="add" onclick={startAdd}>+ Position hinzufügen</button>
+      <button type="button" class="scan" onclick={openScanner} aria-label="Material per Scan erfassen">
+        <Icon name="camera" size={18} />
+        Scannen
+      </button>
+    </div>
   {/if}
 </div>
+
+{#if scannerOpen}
+  <BarcodeScanner onScan={handleScanResult} onClose={() => (scannerOpen = false)} />
+{/if}
 
 <style>
   .section {
@@ -248,12 +297,45 @@
     font-size: 1.1rem;
   }
 
+  .add-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
   .add {
+    flex: 1;
     background: var(--color-surface);
     border: 1px dashed var(--color-primary);
     color: var(--color-primary);
     border-radius: var(--radius-md);
     font-weight: 600;
+  }
+
+  .scan {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    background: var(--color-surface);
+    border: 1px dashed var(--color-primary);
+    color: var(--color-primary);
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    padding: 0 var(--space-3);
+  }
+
+  .scan-hint {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    margin: 0;
+  }
+
+  .scan-hint span {
+    font-weight: 600;
+    word-break: break-all;
   }
 
   .form {
