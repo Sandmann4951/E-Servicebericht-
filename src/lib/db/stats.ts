@@ -152,9 +152,12 @@ export async function getDayIdleEntries(date: ISODate): Promise<DayIdleEntry[]> 
 export interface DayTimelineEntry {
   id: ID;
   kind: 'project' | 'idle' | 'break';
+  date: ISODate;
   startTime?: string;
   endTime?: string;
   minutes: number;
+  /** Nur gesetzt, wenn der Eintrag über die Tagesstempeluhr entstanden ist - für assignIdleTime() (clockActions.ts). */
+  workDayId?: ID;
   /** Nur bei kind === 'project' gesetzt. */
   reportId?: ID;
   projectNumber?: string;
@@ -181,7 +184,14 @@ export async function getDayTimeline(date: ISODate): Promise<DayTimelineEntry[]>
 
   const timeline = await Promise.all(
     withDuration.map(async (entry): Promise<DayTimelineEntry> => {
-      const base = { id: entry.id, startTime: entry.startTime, endTime: entry.endTime, minutes: entry.durationMinutes ?? 0 };
+      const base = {
+        id: entry.id,
+        date: entry.date,
+        startTime: entry.startTime,
+        endTime: entry.endTime,
+        minutes: entry.durationMinutes ?? 0,
+        workDayId: entry.workDayId
+      };
       if (entry.isBreak) {
         return { ...base, kind: 'break' };
       }

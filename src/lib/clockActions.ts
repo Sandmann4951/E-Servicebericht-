@@ -282,6 +282,46 @@ export async function reassignIdleEntry(entryId: ID, reportId: ID): Promise<void
 }
 
 /**
+ * Ordnet Leerlaufzeit aus der Tag-Ansicht der Auswertung (Statistik.svelte)
+ * nachträglich einem Projekt zu - entweder die KOMPLETTE Leerlaufzeit
+ * (`windowStart`/`windowEnd` entsprechen exakt dem bisherigen Zeitraum des
+ * Eintrags, dann reicht ein einfaches Umhängen der reportId, siehe
+ * reassignIdleEntry()) oder nur ein AUSSCHNITT davon (z.B. "von den 3 Std.
+ * Leerlaufzeit gehörte nur die erste knappe Stunde tatsächlich zu Projekt
+ * X") - dann wird der bestehende Eintrag auf genau dieses Zeitfenster
+ * verkleinert UND bekommt die reportId, die davor/danach verbleibende(n)
+ * Lücke(n) bleiben als eigene(r) Leerlaufzeit-Eintrag/-Einträge erhalten
+ * (`subtractTimeRange()` - dieselbe Lücken-Berechnung wie beim Verkleinern
+ * eines Zeiteintrags in updateManualTimeEntry(); klemmt ein zu weit
+ * gewähltes Zeitfenster automatisch auf den bisherigen Zeitraum). Die
+ * Lücken-Einträge bekommen dieselbe workDayId wie der Ursprungseintrag, damit
+ * sie weiter zur "Heute bisher"-Tagesbilanz zählen (listTimeEntriesForDate()),
+ * falls der Tag noch läuft.
+ *
+ * Ohne Effekt, wenn der Ursprungseintrag oder das Zeitfenster unvollständig
+ * ist.
+ */
+export async function assignIdleTime(
+  entry: Pick<TimeEntry, 'id' | 'date' | 'startTime' | 'endTime' | 'workDayId'>,
+  reportId: ID,
+  windowStart: string,
+  windowEnd: string
+): Promise<void> {
+  if (!entry.startTime || !entry.endTime || !windowStart || !windowEnd) return;
+
+  if (windowStart === entry.startTime && windowEnd === entry.endTime) {
+    await reassignIdleEntry(entry.id, reportId);
+    return;
+  }
+
+  const gaps = subtractTimeRange({ start: entry.startTime, end: entry.endTime }, { start: windowStart, end: windowEnd });
+  await updateTimeEntry(entry.id, { startTime: windowStart, endTime: windowEnd, reportId });
+  for (const gap of gaps) {
+    await addTimeEntry(undefined, { date: entry.date, startTime: gap.start, endTime: gap.end, workDayId: entry.workDayId });
+  }
+}
+
+/**
  * Aktualisiert einen manuell im Zeiten-Tab bearbeiteten (bereits
  * bestehenden) Zeiteintrag. Wird der abgedeckte Zeitraum dabei gegenüber dem
  * bisherigen VERKLEINERT oder verschoben - z.B. weil im Nachhinein auffällt,

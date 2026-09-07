@@ -8,9 +8,10 @@
     type DayTimelineEntry
   } from '../lib/db/stats';
   import { deleteTimeEntry, restoreBreak } from '../lib/db/timeEntries';
-  import { addManualBreak, addManualIdleTime, updateManualIdleTime } from '../lib/clockActions';
+  import { addManualBreak, addManualIdleTime, assignIdleTime, updateManualIdleTime } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
-  import type { Absence, AbsenceType, ID } from '../lib/db/types';
+  import { listReports } from '../lib/db/reports';
+  import type { Absence, AbsenceType, ID, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
@@ -110,6 +111,18 @@
   // die tatsächlich benötigten Felder (wie bei updateManualTimeEntry() in
   // clockActions.ts), ein DayTimelineEntry erfüllt das strukturell mit.
   let editingIdleEntry = $state<{ id: ID; startTime?: string; endTime?: string } | undefined>(undefined);
+  // Leerlaufzeit-Eintrag, für den gerade das "Projekt zuordnen"-Panel offen
+  // ist (siehe openAssignIdlePanel() unten) - zweistufig: erst ein Bericht
+  // (assignIdleSelectedReport), danach entweder die komplette Zeit oder ein
+  // per Hand gewähltes Zeitfenster daraus (assignIdleUseFullRange).
+  let assignIdleEntry = $state<DayTimelineEntry | undefined>(undefined);
+  let assignIdleQuery = $state('');
+  let assignIdleReports = $state<ServiceReport[]>([]);
+  let assignIdleSelectedReport = $state<ServiceReport | undefined>(undefined);
+  let assignIdleUseFullRange = $state(true);
+  let assignIdleWindowStart = $state('');
+  let assignIdleWindowEnd = $state('');
+  let assigningIdle = $state(false);
   let monthTarget = $state<MonthTarget>({
     targetMinutes: 0,
     workingDays: 0,
@@ -211,6 +224,7 @@
   }
 
   function openAddIdleForm(): void {
+    closeAssignIdlePanel();
     editingIdleEntry = undefined;
     addIdleStart = '';
     addIdleEnd = '';
@@ -219,6 +233,7 @@
 
   /** Öffnet dasselbe Formular im Bearbeiten-Modus, vorausgefüllt mit den bisherigen Zeiten des angetippten Eintrags. */
   function startEditIdle(entry: DayTimelineEntry): void {
+    closeAssignIdlePanel();
     editingIdleEntry = entry;
     addIdleStart = entry.startTime ?? '';
     addIdleEnd = entry.endTime ?? '';
@@ -261,6 +276,61 @@
       await load();
     } finally {
       addingIdle = false;
+    }
+  }
+
+  const filteredAssignIdleReports = $derived.by(() => {
+    const query = assignIdleQuery.trim().toLowerCase();
+    if (!query) return assignIdleReports;
+    return assignIdleReports.filter(
+      (report) =>
+        report.projectNumber.toLowerCase().includes(query) || (report.customer ?? '').toLowerCase().includes(query)
+    );
+  });
+
+  /**
+   * Öffnet das "Projekt zuordnen"-Panel für einen Leerlaufzeit-Eintrag (siehe
+   * assignIdleEntry oben) - schließt dafür das Zeiten-Bearbeiten-Formular,
+   * falls gerade offen (beide Panels ergeben nebeneinander keinen Sinn).
+   * Lädt bei jedem Öffnen frisch die Liste der zuordenbaren (nicht
+   * gesperrten) Berichte - dieselbe Filterung wie in Leerlaufzeiten.svelte.
+   */
+  async function openAssignIdlePanel(entry: DayTimelineEntry): Promise<void> {
+    closeAddIdleForm();
+    assignIdleEntry = entry;
+    assignIdleQuery = '';
+    assignIdleSelectedReport = undefined;
+    assignIdleUseFullRange = true;
+    assignIdleWindowStart = entry.startTime ?? '';
+    assignIdleWindowEnd = entry.endTime ?? '';
+    const all = await listReports('all');
+    assignIdleReports = all.filter((report) => !report.finalizedAt);
+  }
+
+  function closeAssignIdlePanel(): void {
+    assignIdleEntry = undefined;
+    assignIdleSelectedReport = undefined;
+  }
+
+  /**
+   * Ordnet den geöffneten Leerlaufzeit-Eintrag dem gewählten Bericht zu -
+   * entweder komplett oder nur für das gewählte Zeitfenster (siehe
+   * assignIdleTime() in clockActions.ts, die den Rest bei einer Teil-
+   * Zuordnung automatisch als eigene Leerlaufzeit erhält).
+   */
+  async function confirmAssignIdle(): Promise<void> {
+    if (!assignIdleEntry || !assignIdleSelectedReport || assigningIdle) return;
+    const windowStart = assignIdleUseFullRange ? (assignIdleEntry.startTime ?? '') : assignIdleWindowStart;
+    const windowEnd = assignIdleUseFullRange ? (assignIdleEntry.endTime ?? '') : assignIdleWindowEnd;
+    if (!windowStart || !windowEnd || windowStart >= windowEnd) return;
+    assigningIdle = true;
+    try {
+      await assignIdleTime(assignIdleEntry, assignIdleSelectedReport.id, windowStart, windowEnd);
+      closeAssignIdlePanel();
+      await reloadDayTimeline();
+      await load();
+    } finally {
+      assigningIdle = false;
     }
   }
 
@@ -595,6 +665,14 @@
                   </div>
                 {/if}
                 {#if entry.kind === 'idle'}
+                  <button
+                    type="button"
+                    class="assign-entry"
+                    onclick={() => openAssignIdlePanel(entry)}
+                    aria-label="Leerlaufzeit einem Projekt zuordnen"
+                  >
+                    <Icon name="corner-down-right" size={16} />
+                  </button>
                   <button type="button" class="remove-entry" onclick={() => removeIdleEntry(entry.id)} aria-label="Leerlaufzeit löschen">
                     <Icon name="trash" size={16} />
                   </button>
@@ -604,6 +682,73 @@
                   </button>
                 {/if}
               </li>
+              {#if assignIdleEntry?.id === entry.id}
+                <li class="add-entry-form assign-idle-panel">
+                  {#if !assignIdleSelectedReport}
+                    <input
+                      type="search"
+                      bind:value={assignIdleQuery}
+                      placeholder="Projekt suchen (Projektnummer, Kunde)…"
+                      aria-label="Projekt suchen"
+                    />
+                    {#if filteredAssignIdleReports.length === 0}
+                      <p class="hint small">Keine passenden Berichte gefunden.</p>
+                    {:else}
+                      <ul class="picker-list">
+                        {#each filteredAssignIdleReports as report (report.id)}
+                          <li>
+                            <button type="button" onclick={() => (assignIdleSelectedReport = report)}>
+                              <strong>{report.projectNumber}</strong>
+                              {#if report.customer}<span> · {report.customer}</span>{/if}
+                            </button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                    <div class="add-entry-actions">
+                      <button type="button" class="cancel" onclick={closeAssignIdlePanel}>Abbrechen</button>
+                    </div>
+                  {:else}
+                    <p class="assign-target">
+                      Zuordnen zu <strong>{assignIdleSelectedReport.projectNumber}</strong>{#if assignIdleSelectedReport.customer}
+                        · {assignIdleSelectedReport.customer}{/if}
+                    </p>
+                    <div class="assign-range-toggle" role="tablist" aria-label="Zeitraum wählen">
+                      <button type="button" class:active={assignIdleUseFullRange} onclick={() => (assignIdleUseFullRange = true)}>
+                        Komplette Zeit ({entry.startTime}–{entry.endTime})
+                      </button>
+                      <button type="button" class:active={!assignIdleUseFullRange} onclick={() => (assignIdleUseFullRange = false)}>
+                        Zeitfenster wählen
+                      </button>
+                    </div>
+                    {#if !assignIdleUseFullRange}
+                      <div class="entry-time-row">
+                        <input
+                          type="time"
+                          bind:value={assignIdleWindowStart}
+                          min={entry.startTime}
+                          max={entry.endTime}
+                          aria-label="Zuordnung von"
+                        />
+                        <span>–</span>
+                        <input
+                          type="time"
+                          bind:value={assignIdleWindowEnd}
+                          min={entry.startTime}
+                          max={entry.endTime}
+                          aria-label="Zuordnung bis"
+                        />
+                      </div>
+                    {/if}
+                    <div class="add-entry-actions">
+                      <button type="button" class="cancel" onclick={() => (assignIdleSelectedReport = undefined)}>
+                        Anderes Projekt
+                      </button>
+                      <button type="button" class="primary" onclick={confirmAssignIdle} disabled={assigningIdle}>Zuordnen</button>
+                    </div>
+                  {/if}
+                </li>
+              {/if}
             {/each}
           </ul>
         {/if}
@@ -1368,6 +1513,74 @@
     color: var(--color-danger);
     padding: 0 0 0 var(--space-2);
     min-height: auto;
+  }
+
+  .assign-entry {
+    background: transparent;
+    border: none;
+    color: var(--color-primary);
+    padding: 0 0 0 var(--space-2);
+    min-height: auto;
+  }
+
+  /* Panel zum Zuordnen einer Leerlaufzeit zu einem Projekt (siehe
+     openAssignIdlePanel() oben) - wiederverwendet ".add-entry-form" für den
+     Karten-Look, ergänzt hier nur den zweistufigen Inhalt (Projekt-Suche,
+     danach Zeitraum-Wahl). */
+  .assign-target {
+    margin: 0;
+  }
+
+  .picker-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .picker-list button {
+    width: 100%;
+    text-align: left;
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    min-height: auto;
+    font-size: 0.9rem;
+  }
+
+  .picker-list button span {
+    color: var(--color-text-muted);
+  }
+
+  .assign-range-toggle {
+    display: flex;
+    gap: var(--space-2);
+    background: var(--color-surface-muted);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+  }
+
+  .assign-range-toggle button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-sm) - 2px);
+    padding: var(--space-2);
+    min-height: auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .assign-range-toggle button.active {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: 0 1px 2px var(--color-shadow);
   }
 
   .add-entry-toggle {

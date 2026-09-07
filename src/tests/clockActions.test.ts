@@ -3,6 +3,7 @@ import { resetTestDB } from './testUtils';
 import {
   addManualBreak,
   addManualIdleTime,
+  assignIdleTime,
   autoCheckOutIfExceeded,
   checkInDay,
   checkOutDay,
@@ -721,6 +722,88 @@ describe('reassignIdleEntry', () => {
     expect(updated?.timeEntryCount).toBe(1);
     expect(updated?.totalDurationMinutes).toBe(60);
     expect(await listUnassignedIdleEntries()).toEqual([]);
+  });
+});
+
+describe('assignIdleTime (Leerlaufzeit in der Auswertung/Tag-Ansicht einem Projekt zuordnen)', () => {
+  it('ordnet die KOMPLETTE Leerlaufzeit einem Bericht zu, wenn das Zeitfenster dem bisherigen Zeitraum entspricht (keine Lücke)', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00', workDayId: day.id });
+
+    await assignIdleTime(entry, report.id, '08:00', '11:00');
+
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries).toHaveLength(1);
+    expect(reportEntries[0]).toMatchObject({ id: entry.id, startTime: '08:00', endTime: '11:00' });
+    const updated = await getReport(report.id);
+    expect(updated?.totalDurationMinutes).toBe(180);
+    expect(await getDayIdleEntries('2026-08-10')).toEqual([]);
+  });
+
+  it('ordnet nur ein Zeitfenster MITTEN in der Leerlaufzeit zu - davor und danach bleibt Leerlaufzeit erhalten', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00' });
+
+    await assignIdleTime(entry, report.id, '09:00', '09:45');
+
+    const reportEntries = await listTimeEntries(report.id);
+    expect(reportEntries).toHaveLength(1);
+    expect(reportEntries[0]).toMatchObject({ id: entry.id, startTime: '09:00', endTime: '09:45' });
+    const updated = await getReport(report.id);
+    expect(updated?.totalDurationMinutes).toBe(45);
+
+    const idle = await getDayIdleEntries('2026-08-10');
+    expect(idle.map((e) => [e.startTime, e.endTime]).sort()).toEqual([
+      ['08:00', '09:00'],
+      ['09:45', '11:00']
+    ]);
+  });
+
+  it('ordnet ein Zeitfenster am ANFANG zu - nur eine Lücke danach bleibt als Leerlaufzeit', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00' });
+
+    await assignIdleTime(entry, report.id, '08:00', '09:00');
+
+    const idle = await getDayIdleEntries('2026-08-10');
+    expect(idle).toHaveLength(1);
+    expect(idle[0]).toMatchObject({ startTime: '09:00', endTime: '11:00' });
+  });
+
+  it('ordnet ein Zeitfenster am ENDE zu - nur eine Lücke davor bleibt als Leerlaufzeit', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00' });
+
+    await assignIdleTime(entry, report.id, '10:00', '11:00');
+
+    const idle = await getDayIdleEntries('2026-08-10');
+    expect(idle).toHaveLength(1);
+    expect(idle[0]).toMatchObject({ startTime: '08:00', endTime: '10:00' });
+  });
+
+  it('übernimmt die workDayId des Ursprungseintrags für die verbleibende(n) Lücke(n) - zählt weiter zur "Heute bisher"-Tagesbilanz', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const day = await checkInWorkDay();
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00', workDayId: day.id });
+
+    await assignIdleTime(entry, report.id, '09:00', '09:45');
+
+    const remaining = await listTimeEntriesForWorkDay(day.id);
+    // Der zugeordnete Projekt-Abschnitt (09:00-09:45) plus die zwei Lücken (08:00-09:00, 09:45-11:00),
+    // alle mit derselben workDayId - keine Lücke ist "vom Tagesstempel abgekoppelt".
+    expect(remaining).toHaveLength(3);
+  });
+
+  it('hat keinen Effekt, wenn der Ursprungseintrag oder das Zeitfenster unvollständig ist', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(undefined, { date: '2026-08-10', startTime: '08:00', endTime: '11:00' });
+
+    await assignIdleTime({ ...entry, startTime: undefined }, report.id, '08:00', '09:00');
+    await assignIdleTime(entry, report.id, '', '09:00');
+
+    expect(await listTimeEntries(report.id)).toEqual([]);
+    expect(await getDayIdleEntries('2026-08-10')).toHaveLength(1);
   });
 });
 

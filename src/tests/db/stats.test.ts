@@ -150,6 +150,9 @@ describe('getDayTimeline', () => {
       ['break', '12:00', '12:30', 30]
     ]);
     expect(timeline[1]).toMatchObject({ reportId: report.id, projectNumber: 'A', customer: 'Müller GmbH' });
+    // date (und ggf. workDayId) werden für die spätere Zuordnung von Leerlaufzeit
+    // zu einem Projekt benötigt (siehe assignIdleTime() in clockActions.ts).
+    expect(timeline.every((e) => e.date === '2026-08-10')).toBe(true);
   });
 
   it('schließt einen noch offenen (laufenden) Abschnitt ohne Endzeit aus', async () => {
