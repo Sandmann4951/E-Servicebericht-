@@ -433,11 +433,29 @@
 
       // Auf dem iPhone spürbar besserer Workflow: direkt aus dem Share-Sheet
       // per Mail/WhatsApp/AirDrop verschicken, statt erst in Dateien suchen zu
-      // müssen. Fallback auf klassischen Download, wenn nicht unterstützt.
+      // müssen. navigator.share() kann trotz vorher erfolgreichem canShare()
+      // trotzdem fehlschlagen - beobachtet auf Android (Chrome, sowohl im
+      // Browser als auch installiert): die "User Activation" (das kurze
+      // Zeitfenster, in dem der Browser einen echten Nutzer-Klick als Beleg
+      // akzeptiert) kann durch die asynchrone Dokument-Erzeugung oben bereits
+      // abgelaufen sein, bevor share() überhaupt aufgerufen wird - auf Android
+      // deutlich strenger/kürzer bemessen als in iOS Safari. Ein solcher
+      // Fehlschlag ist deshalb bewusst KEIN Grund, den Export komplett
+      // abzubrechen: statt "Export fehlgeschlagen" anzuzeigen, fällt der
+      // Export auf den klassischen Download-Link darunter zurück, der ganz
+      // ohne User-Activation auskommt und deshalb zuverlässig funktioniert.
       if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: fileName });
-        await markReportExported(reportId);
-        return;
+        try {
+          await navigator.share({ files: [file], title: fileName });
+          await markReportExported(reportId);
+          return;
+        } catch (shareErr) {
+          // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler - dort
+          // NICHT auf den Download zurückfallen (der Nutzer wollte gerade
+          // nicht exportieren), sondern den Export einfach beenden.
+          if (shareErr instanceof DOMException && shareErr.name === 'AbortError') return;
+          console.warn('navigator.share() fehlgeschlagen, falle auf Download zurück', shareErr);
+        }
       }
 
       const url = URL.createObjectURL(blob);
@@ -450,8 +468,6 @@
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
       await markReportExported(reportId);
     } catch (err) {
-      // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler.
-      if (err instanceof DOMException && err.name === 'AbortError') return;
       exportError = true;
       console.error('Export fehlgeschlagen', err);
     } finally {
