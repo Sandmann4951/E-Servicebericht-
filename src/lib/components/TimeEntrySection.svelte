@@ -110,17 +110,26 @@
       const overlaps = await findOverlappingTimeEntries(formDate, startTime, endTime, editingId);
       if (overlaps.length > 0) {
         const list = await describeOverlaps(overlaps);
-        if (!confirm(`Diese Zeit überschneidet sich mit:\n${list}\n\nTrotzdem so speichern?`)) return;
+        // Bewusst NUR EINE Rückfrage statt vormals zwei nacheinander (Speichern
+        // trotz Überschneidung? / danach separat: automatisch kürzen?) - zwei
+        // Dialoge hintereinander luden dazu ein, den zweiten unbedacht
+        // wegzutippen ("einfach beide OK/weiter") und damit den überschneidenden
+        // Alt-Eintrag versehentlich UNGEKÜRZT stehen zu lassen - mit der Folge,
+        // dass dieselbe Zeitspanne doppelt gezählt wird (Gesamtzeit zu hoch,
+        // ohne dass es beim Speichern selbst auffällt). Trimmen ist ohnehin
+        // nicht-destruktiv (nur das überschneidende Fenster wird entfernt, der
+        // übrige Zeitraum bleibt erhalten, ggf. gesplittet) - deshalb hier direkt
+        // als Teil derselben Bestätigung statt als eigene, überspringbare Frage.
+        if (
+          !confirm(
+            `Diese Zeit überschneidet sich mit:\n${list}\n\nBeim Speichern wird die überschneidende Zeit bei diesen Einträgen automatisch entfernt (der übrige Zeitraum bleibt erhalten). Trotzdem speichern?`
+          )
+        ) {
+          return;
+        }
 
         await persistEntry(payload);
-
-        // Bewusst NICHT die ganzen überschneidenden Einträge löschen, sondern
-        // nur das überschneidende Zeitfenster herausschneiden - der Rest
-        // dieser Einträge (z.B. die Zeit vor oder nach der neuen Buchung)
-        // bleibt erhalten, ggf. gesplittet in zwei Teile.
-        if (confirm(`Soll die überschneidende Zeit bei diesen Einträgen automatisch entfernt werden (der übrige Zeitraum bleibt erhalten)?\n${list}`)) {
-          await trimOverlappingTimeEntries(overlaps, startTime, endTime);
-        }
+        await trimOverlappingTimeEntries(overlaps, startTime, endTime);
         resetForm();
         await load();
         onChanged();
