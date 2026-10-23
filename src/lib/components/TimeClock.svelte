@@ -71,6 +71,51 @@
     }
   }
 
+  /**
+   * Beim Beenden einer Fahrtzeit (Hinfahrt: "Fahrtzeit beenden & einchecken",
+   * Rückfahrt: "Auschecken") wird zuerst nach den gefahrenen Kilometern
+   * gefragt. Sie landen direkt am Fahrtzeit-Eintrag (TimeEntry.kilometers)
+   * und sind damit in den Zeiten und im Word-Export sichtbar. Leer lassen =
+   * keine Angabe, "Abbrechen" = Fahrtzeit läuft weiter.
+   */
+  let kmPrompt = $state<{ travelEntry: TimeEntry; returnTrip: boolean } | undefined>(undefined);
+  let kmInput = $state('');
+
+  function askKilometers(): void {
+    if (busy || !activeEntry?.isTravel || locked) return;
+    kmInput = activeEntry.kilometers !== undefined ? String(activeEntry.kilometers).replace('.', ',') : '';
+    kmPrompt = { travelEntry: activeEntry, returnTrip: returnTravel };
+  }
+
+  /** Setzt den Fokus direkt ins Kilometer-Feld, damit auf dem Handy sofort die Zahlentastatur aufgeht. */
+  function focusOnOpen(node: HTMLInputElement): void {
+    node.focus();
+    node.select();
+  }
+
+  /** Leeres Feld = keine Angabe; Komma oder Punkt als Dezimaltrenner. */
+  function parseKilometers(value: string): number | undefined {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const km = Number(trimmed.replace(',', '.'));
+    return Number.isFinite(km) && km >= 0 ? km : undefined;
+  }
+
+  async function confirmKilometers(): Promise<void> {
+    if (!kmPrompt) return;
+    const { travelEntry, returnTrip } = kmPrompt;
+    const kilometers = parseKilometers(kmInput);
+    kmPrompt = undefined;
+    if (kilometers !== undefined) {
+      await updateTimeEntry(travelEntry.id, { kilometers });
+    }
+    if (returnTrip) {
+      await clockOut();
+    } else {
+      await switchMode(false);
+    }
+  }
+
   async function clockOut(): Promise<void> {
     if (busy || !activeEntry || locked) return;
     busy = true;
@@ -108,9 +153,9 @@
           nur noch "Auschecken" (siehe isReturnTravel()).
         -->
         {#if activeEntry.isTravel && returnTravel}
-          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+          <button type="button" class="clock-out" onclick={askKilometers} disabled={busy}><Icon name="stop" />Auschecken</button>
         {:else if activeEntry.isTravel}
-          <button type="button" class="clock-in" onclick={() => switchMode(false)} disabled={busy}><Icon name="play" />Fahrtzeit beenden &amp; einchecken</button>
+          <button type="button" class="clock-in" onclick={askKilometers} disabled={busy}><Icon name="play" />Fahrtzeit beenden &amp; einchecken</button>
         {:else}
           <div class="button-row">
             <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
@@ -129,7 +174,94 @@
   </div>
 {/if}
 
+{#if kmPrompt}
+  <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="km-title">
+    <form
+      class="dialog"
+      onsubmit={(event) => {
+        event.preventDefault();
+        void confirmKilometers();
+      }}
+    >
+      <h2 id="km-title">{kmPrompt.returnTrip ? 'Rückfahrt' : 'Hinfahrt'}: gefahrene Kilometer</h2>
+      <label>
+        Kilometer
+        <input type="text" inputmode="decimal" bind:value={kmInput} placeholder="z.B. 42" use:focusOnOpen />
+      </label>
+      <p class="km-hint">Leer lassen, wenn du es nicht weißt. Du kannst die Kilometer später in den Zeiten nachtragen.</p>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" onclick={() => (kmPrompt = undefined)}>Abbrechen</button>
+        <button type="submit" class="primary">{kmPrompt.returnTrip ? 'Auschecken' : 'Einchecken'}</button>
+      </div>
+    </form>
+  </div>
+{/if}
+
 <style>
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: var(--space-4);
+  }
+
+  .dialog {
+    width: 100%;
+    max-width: 380px;
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    box-shadow: 0 20px 48px var(--color-shadow);
+  }
+
+  .dialog h2 {
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .dialog label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+
+  .km-hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+  }
+
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  .ghost {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .primary {
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    font-weight: 600;
+  }
+
   .clock {
     display: flex;
     flex-direction: column;
