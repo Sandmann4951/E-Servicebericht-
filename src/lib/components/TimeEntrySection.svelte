@@ -215,6 +215,15 @@
     onChanged();
   }
 
+  /**
+   * Holt das gerade geöffnete Formular in den sichtbaren Bereich - beim
+   * Bearbeiten eines Eintrags weiter unten in einer langen Liste würde es sonst
+   * teilweise unterhalb des Bildschirmrands aufklappen.
+   */
+  function revealOnOpen(node: HTMLElement): void {
+    node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
   async function remove(entry: TimeEntry): Promise<void> {
     if (!confirm('Diesen Zeiteintrag löschen?')) return;
     await deleteTimeEntry(entry.id);
@@ -223,6 +232,75 @@
     onChanged();
   }
 </script>
+
+<!--
+  Ein Formular für beides: beim Bearbeiten klappt es direkt an der Stelle des
+  angetippten Eintrags auf (statt unten unter der Liste), beim Anlegen eines
+  neuen Eintrags erscheint es wie bisher unter der Liste.
+-->
+{#snippet entryForm()}
+  <form
+    class="form"
+    use:revealOnOpen
+    onsubmit={(event) => {
+      event.preventDefault();
+      void save();
+    }}
+  >
+    <label>
+      Datum
+      <input type="date" bind:value={formDate} required />
+    </label>
+    <div class="two-col">
+      <label>
+        Start
+        <input type="time" bind:value={formStart} />
+      </label>
+      <label>
+        Ende
+        <input type="time" bind:value={formEnd} />
+      </label>
+    </div>
+    {#if previewDuration !== undefined}
+      <p class="duration-preview">
+        Dauer: {formatDurationMinutes(previewDuration)}
+        {#if formPauseEnabled && formPauseHours > 0 && formPauseHours * 60 < previewDuration}
+          <span class="duration-net">
+            (abzüglich {formPauseHours} Std. Pause: {formatDurationMinutes(previewDuration - Math.round(formPauseHours * 60))})
+          </span>
+        {/if}
+      </p>
+    {/if}
+    <label class="checkbox-label">
+      <input type="checkbox" bind:checked={formPauseEnabled} />
+      Pause abziehen
+    </label>
+    {#if formPauseEnabled}
+      <label>
+        Pause (Std.)
+        <input type="number" inputmode="decimal" step="0.25" min="0.25" bind:value={formPauseHours} />
+      </label>
+    {/if}
+    <label class="checkbox-label">
+      <input type="checkbox" bind:checked={formTravel} />
+      Fahrtzeit
+    </label>
+    {#if formTravel}
+      <label>
+        Kilometer
+        <input type="number" inputmode="decimal" step="0.1" min="0" bind:value={formKilometers} placeholder="z.B. 42" />
+      </label>
+    {/if}
+    <label>
+      Durchgeführte Arbeiten (optional)
+      <textarea rows="2" bind:value={formNote} placeholder="z.B. Fehlersuche, Inbetriebnahme…"></textarea>
+    </label>
+    <div class="form-actions">
+      <button type="button" class="ghost" onclick={resetForm}>Abbrechen</button>
+      <button type="submit" class="primary">Speichern</button>
+    </div>
+  </form>
+{/snippet}
 
 <div class="section">
   {#if loading}
@@ -235,8 +313,10 @@
       <ul class="list">
         {#each entries as entry (entry.id)}
           {@const exceedsMax = exceedsMaxDailyWork(entry.durationMinutes)}
-          <li class="row" class:exceeds-max={exceedsMax}>
-            {#if locked}
+          <li class="row" class:exceeds-max={exceedsMax} class:editing={!locked && editingId === entry.id}>
+            {#if !locked && editingId === entry.id}
+              {@render entryForm()}
+            {:else if locked}
               <div class="row-main">
                 <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${entry.kilometers} km`}{/if}</span>{/if}</span>
                 <span class="meta">
@@ -277,66 +357,9 @@
   {#if locked}
     <p class="hint">Bericht ist gesperrt – Zeiten können nicht mehr geändert werden.</p>
   {:else if showForm}
-    <form
-      class="form"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void save();
-      }}
-    >
-      <label>
-        Datum
-        <input type="date" bind:value={formDate} required />
-      </label>
-      <div class="two-col">
-        <label>
-          Start
-          <input type="time" bind:value={formStart} />
-        </label>
-        <label>
-          Ende
-          <input type="time" bind:value={formEnd} />
-        </label>
-      </div>
-      {#if previewDuration !== undefined}
-        <p class="duration-preview">
-          Dauer: {formatDurationMinutes(previewDuration)}
-          {#if formPauseEnabled && formPauseHours > 0 && formPauseHours * 60 < previewDuration}
-            <span class="duration-net">
-              (abzüglich {formPauseHours} Std. Pause: {formatDurationMinutes(previewDuration - Math.round(formPauseHours * 60))})
-            </span>
-          {/if}
-        </p>
-      {/if}
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={formPauseEnabled} />
-        Pause abziehen
-      </label>
-      {#if formPauseEnabled}
-        <label>
-          Pause (Std.)
-          <input type="number" inputmode="decimal" step="0.25" min="0.25" bind:value={formPauseHours} />
-        </label>
-      {/if}
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={formTravel} />
-        Fahrtzeit
-      </label>
-      {#if formTravel}
-        <label>
-          Kilometer
-          <input type="number" inputmode="decimal" step="0.1" min="0" bind:value={formKilometers} placeholder="z.B. 42" />
-        </label>
-      {/if}
-      <label>
-        Durchgeführte Arbeiten (optional)
-        <textarea rows="2" bind:value={formNote} placeholder="z.B. Fehlersuche, Inbetriebnahme…"></textarea>
-      </label>
-      <div class="form-actions">
-        <button type="button" class="ghost" onclick={resetForm}>Abbrechen</button>
-        <button type="submit" class="primary">Speichern</button>
-      </div>
-    </form>
+    {#if !editingId}
+      {@render entryForm()}
+    {/if}
   {:else}
     <button type="button" class="add" onclick={startAdd}>+ Tag hinzufügen</button>
   {/if}
@@ -371,6 +394,15 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
+  }
+
+  .row.editing {
+    display: block;
+    border-color: var(--color-primary);
+  }
+
+  .row.editing .form {
+    border: none;
   }
 
   .row.exceeds-max {
