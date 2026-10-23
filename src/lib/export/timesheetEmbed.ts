@@ -1,6 +1,6 @@
 import type PizZip from 'pizzip';
 import type { TimeEntry } from '../db/types';
-import { formatDateDE } from '../utils/date';
+import { formatDateDE, formatDurationMinutes } from '../utils/date';
 
 /**
  * Befüllt die in die ELSA-Vorlage eingebettete Excel-"Zeiten"-Tabelle mit
@@ -219,8 +219,15 @@ function patchWorkbookStream(stream: Uint8Array, entries: TimeEntry[], technicia
     const parts = [
       buildLabelRecord(dataRow, 0, ixfe[0], formatDateDE(entry.date)),
       technicianName ? buildLabelRecord(dataRow, 1, ixfe[1], technicianName) : buildBlankRecord(dataRow, 1, ixfe[1]),
-      buildBlankRecord(dataRow, 2, ixfe[2]),
-      buildBlankRecord(dataRow, 3, ixfe[3]),
+      // Fahrtzeit-Einträge (TimeEntry.isTravel) füllen zusätzlich die
+      // Spalten "Anfahrt Fahrzeit"/"Anfahrt Km" - bewusst als Text, da keine
+      // Formel diese Zellen referenziert und ihr Zahlenformat unbekannt ist.
+      entry.isTravel
+        ? buildLabelRecord(dataRow, 2, ixfe[2], formatDurationMinutes(entry.durationMinutes))
+        : buildBlankRecord(dataRow, 2, ixfe[2]),
+      entry.isTravel && entry.kilometers !== undefined
+        ? buildLabelRecord(dataRow, 3, ixfe[3], `${String(entry.kilometers).replace('.', ',')} km`)
+        : buildBlankRecord(dataRow, 3, ixfe[3]),
       buildNumberRecord(dataRow, 4, ixfe[4], startFraction),
       buildNumberRecord(dataRow, 5, ixfe[5], endFraction)
     ];

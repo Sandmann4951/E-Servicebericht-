@@ -271,10 +271,13 @@ export async function autoCheckOutIfExceeded(): Promise<AutoCheckOutResult | und
  * versehentlichem Wechsel) - Leerlaufzeit→Projekt oder Projekt→Leerlaufzeit
  * ist erwartetes, alltägliches Verhalten und braucht keine Rückfrage mehr.
  *
+ * `options.travel` öffnet den neuen Abschnitt als Fahrtzeit (siehe
+ * switchToTravel()/TimeEntry.isTravel) statt als normale Projektzeit.
+ *
  * @returns true, wenn gewechselt wurde; false bei gesperrtem Ziel-Bericht
  * oder abgelehnter Rückfrage.
  */
-export async function switchToProject(reportId: ID): Promise<boolean> {
+export async function switchToProject(reportId: ID, options: { travel?: boolean } = {}): Promise<boolean> {
   const targetReport = await getReport(reportId);
   if (!targetReport || targetReport.finalizedAt) return false;
 
@@ -293,8 +296,28 @@ export async function switchToProject(reportId: ID): Promise<boolean> {
   if (current) {
     await updateTimeEntry(current.id, { endTime: nowHHmm() });
   }
-  await addTimeEntry(reportId, { date: todayISODate(), startTime: nowHHmm(), workDayId: day.id });
+  await addTimeEntry(reportId, { date: todayISODate(), startTime: nowHHmm(), workDayId: day.id, isTravel: options.travel });
   return true;
+}
+
+/**
+ * Checkt als Fahrtzeit in ein Projekt ein ("Fahrtzeit"-Button neben
+ * "Einchecken" im Bericht) - verhält sich exakt wie switchToProject(), nur
+ * dass der neue Abschnitt als Fahrtzeit markiert wird. Beim Beenden der
+ * Fahrtzeit (endTravel()) wird automatisch normal ins selbe Projekt
+ * eingecheckt.
+ */
+export async function switchToTravel(reportId: ID): Promise<boolean> {
+  return switchToProject(reportId, { travel: true });
+}
+
+/**
+ * Beendet die laufende Fahrtzeit eines Berichts und checkt direkt normal in
+ * dasselbe Projekt ein (Ankunft beim Kunden) - der Fahrtzeit-Abschnitt bleibt
+ * als eigener, markierter Eintrag in den Zeiten erhalten.
+ */
+export async function endTravel(reportId: ID): Promise<boolean> {
+  return switchToProject(reportId);
 }
 
 /**
@@ -386,7 +409,7 @@ export async function assignIdleTime(
  */
 export async function updateManualTimeEntry(
   original: Pick<TimeEntry, 'id' | 'date' | 'startTime' | 'endTime'>,
-  payload: { date: string; startTime?: string; endTime?: string; note?: string }
+  payload: { date: string; startTime?: string; endTime?: string; note?: string; isTravel?: boolean; kilometers?: number }
 ): Promise<void> {
   await updateTimeEntry(original.id, payload);
 

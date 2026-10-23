@@ -18,6 +18,10 @@ export interface TimeEntryInput {
   isBreak?: boolean;
   /** Siehe TimeEntry.trimRecords - nur von checkOutDay() beim Anlegen eines Pause-Eintrags gesetzt. */
   trimRecords?: TimeEntryTrimRecord[];
+  /** Siehe TimeEntry.isTravel. */
+  isTravel?: boolean;
+  /** Siehe TimeEntry.kilometers. */
+  kilometers?: number;
 }
 
 /**
@@ -191,6 +195,8 @@ export async function trimOverlappingTimeEntries(
       originalStartTime: entry.startTime,
       originalEndTime: entry.endTime,
       originalNote: entry.note,
+      originalIsTravel: entry.isTravel,
+      originalKilometers: entry.kilometers,
       wasDeleted: false
     };
 
@@ -202,7 +208,10 @@ export async function trimOverlappingTimeEntries(
         endTime: entry.endTime,
         note: entry.note,
         workDayId: entry.workDayId,
-        isBreak: entry.isBreak
+        isBreak: entry.isBreak,
+        // Kilometer bewusst NICHT mitkopieren - sie bleiben am ersten Teil,
+        // sonst würden sie beim Splitten doppelt gezählt.
+        isTravel: entry.isTravel
       });
       record.splitEntryId = created.id;
     } else if (remainderBefore) {
@@ -238,6 +247,8 @@ export async function addTimeEntry(reportId: ID | undefined, input: TimeEntryInp
     note: input.note?.trim() || undefined,
     isBreak: input.isBreak || undefined,
     trimRecords: input.trimRecords,
+    isTravel: input.isTravel || undefined,
+    kilometers: input.isTravel ? input.kilometers : undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -271,6 +282,7 @@ export async function updateTimeEntry(
     updatedAt: new Date().toISOString()
   };
   merged.durationMinutes = resolveDuration(merged);
+  if (!merged.isTravel) merged.kilometers = undefined;
 
   await store.put(merged);
   // Ändert sich die reportId (z.B. beim nachträglichen Zuordnen eines
@@ -332,7 +344,9 @@ export async function restoreBreak(id: ID): Promise<void> {
         startTime: record.originalStartTime,
         endTime: record.originalEndTime,
         note: record.originalNote,
-        workDayId: record.workDayId
+        workDayId: record.workDayId,
+        isTravel: record.originalIsTravel,
+        kilometers: record.originalKilometers
       });
       continue;
     }

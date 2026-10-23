@@ -37,6 +37,10 @@
   // eingegebenen Zeitraum gelegt.
   let formPauseEnabled = $state(false);
   let formPauseHours = $state(0.5);
+  // Fahrtzeit-Kennzeichnung (siehe TimeEntry.isTravel) - Kilometer-Feld nur,
+  // wenn der Eintrag als Fahrtzeit markiert ist.
+  let formTravel = $state(false);
+  let formKilometers = $state<number | undefined>(undefined);
 
   async function load(): Promise<void> {
     loading = true;
@@ -61,6 +65,8 @@
     formNote = '';
     formPauseEnabled = false;
     formPauseHours = 0.5;
+    formTravel = false;
+    formKilometers = undefined;
     editingId = undefined;
     editingOriginal = undefined;
     showForm = false;
@@ -78,6 +84,8 @@
     formStart = entry.startTime ?? '';
     formEnd = entry.endTime ?? '';
     formNote = entry.note ?? '';
+    formTravel = entry.isTravel ?? false;
+    formKilometers = entry.kilometers;
     // Die "Pause abziehen"-Vorgabe gilt nur fürs Anlegen - beim Bearbeiten
     // unabhängig vom vorherigen Formularzustand immer deaktiviert, damit nicht
     // versehentlich erneut eine Pause aus dem bereits gespeicherten Eintrag
@@ -107,7 +115,14 @@
     return lines.join('\n');
   }
 
-  async function persistEntry(payload: { date: string; startTime?: string; endTime?: string; note: string }): Promise<void> {
+  async function persistEntry(payload: {
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    note: string;
+    isTravel: boolean;
+    kilometers?: number;
+  }): Promise<void> {
     if (editingId && editingOriginal) {
       await updateManualTimeEntry(editingOriginal, payload);
     } else {
@@ -134,7 +149,12 @@
     if (!formDate) return;
     const startTime = formStart || undefined;
     const endTime = formEnd || undefined;
-    const payload = { date: formDate, startTime, endTime, note: formNote };
+    // Leeres Zahlenfeld liefert je nach Browser undefined/null/"" - alles als "keine Angabe" werten.
+    const kilometers =
+      formTravel && typeof formKilometers === 'number' && Number.isFinite(formKilometers) && formKilometers >= 0
+        ? formKilometers
+        : undefined;
+    const payload = { date: formDate, startTime, endTime, note: formNote, isTravel: formTravel, kilometers };
 
     // Nur beim ERSTMALIGEN Ausfüllen einer bisher leeren Notiz (neuer
     // Eintrag, oder nachträgliches erstmaliges Ausfüllen) hängt diese
@@ -218,7 +238,7 @@
           <li class="row" class:exceeds-max={exceedsMax}>
             {#if locked}
               <div class="row-main">
-                <span class="date">{formatDateDE(entry.date)}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${entry.kilometers} km`}{/if}</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
@@ -232,7 +252,7 @@
               </div>
             {:else}
               <button type="button" class="row-main" onclick={() => startEdit(entry)}>
-                <span class="date">{formatDateDE(entry.date)}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${entry.kilometers} km`}{/if}</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
@@ -296,6 +316,16 @@
         <label>
           Pause (Std.)
           <input type="number" inputmode="decimal" step="0.25" min="0.25" bind:value={formPauseHours} />
+        </label>
+      {/if}
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={formTravel} />
+        Fahrtzeit
+      </label>
+      {#if formTravel}
+        <label>
+          Kilometer
+          <input type="number" inputmode="decimal" step="0.1" min="0" bind:value={formKilometers} placeholder="z.B. 42" />
         </label>
       {/if}
       <label>
@@ -362,6 +392,22 @@
 
   .date {
     font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .travel-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+    border-radius: 999px;
+    padding: 1px 8px;
   }
 
   .meta {
