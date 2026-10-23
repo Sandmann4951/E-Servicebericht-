@@ -1,13 +1,15 @@
 <script lang="ts">
   import { getActiveTimeEntry, updateTimeEntry } from '../db/timeEntries';
   import type { TimeEntry } from '../db/types';
-  import { endTravel, switchToIdle, switchToProject, switchToTravel } from '../clockActions';
+  import { endTravel, isReturnTravel, switchToIdle, switchToProject, switchToTravel } from '../clockActions';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
   import Icon from './Icon.svelte';
 
   let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
 
   let activeEntry = $state<TimeEntry | undefined>(undefined);
+  /** Nur bei laufender Fahrtzeit relevant: Rückfahrt (nur noch Auschecken) statt Hinfahrt (nur Einchecken). */
+  let returnTravel = $state(false);
   let loading = $state(true);
   let busy = $state(false);
   /** Nur zum periodischen Neuberechnen der Anzeige - kein eigener Nutzwert. */
@@ -16,6 +18,7 @@
   async function load(): Promise<void> {
     loading = true;
     activeEntry = await getActiveTimeEntry(reportId);
+    returnTravel = activeEntry?.isTravel ? await isReturnTravel(activeEntry) : false;
     loading = false;
   }
 
@@ -54,7 +57,7 @@
   /**
    * Wechselt innerhalb dieses Projekts zwischen Arbeit und Fahrtzeit:
    * "Fahrtzeit starten" (Rückfahrt) aus der Projektzeit heraus bzw.
-   * "Einchecken" (Ankunft) aus einer laufenden Fahrtzeit heraus.
+   * "Fahrtzeit beenden & einchecken" (Ankunft) aus der Hinfahrt heraus.
    */
   async function switchMode(travel: boolean): Promise<void> {
     if (busy || !activeEntry || locked) return;
@@ -100,19 +103,20 @@
       </div>
       {#if !locked}
         <!--
-          Während der Fahrtzeit: "Einchecken" (Ankunft beim Kunden) oder
-          "Auschecken" (Rückfahrt beendet). Während der Projektzeit:
-          "Auschecken" oder "Fahrtzeit starten" für die Rückfahrt.
+          Hinfahrt: nur "Fahrtzeit beenden & einchecken". Projektzeit:
+          "Auschecken" oder "Fahrtzeit starten" für die Rückfahrt. Rückfahrt:
+          nur noch "Auschecken" (siehe isReturnTravel()).
         -->
-        <div class="button-row">
-          {#if activeEntry.isTravel}
-            <button type="button" class="clock-in" onclick={() => switchMode(false)} disabled={busy}><Icon name="play" />Einchecken</button>
-            <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
-          {:else}
+        {#if activeEntry.isTravel && returnTravel}
+          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+        {:else if activeEntry.isTravel}
+          <button type="button" class="clock-in" onclick={() => switchMode(false)} disabled={busy}><Icon name="play" />Fahrtzeit beenden &amp; einchecken</button>
+        {:else}
+          <div class="button-row">
             <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
             <button type="button" class="clock-in travel" onclick={() => switchMode(true)} disabled={busy}><Icon name="truck" />Fahrtzeit starten</button>
-          {/if}
-        </div>
+          </div>
+        {/if}
       {/if}
     {:else if locked}
       <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>

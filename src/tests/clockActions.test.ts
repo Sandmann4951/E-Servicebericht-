@@ -9,6 +9,7 @@ import {
   checkInDay,
   checkOutDay,
   endTravel,
+  isReturnTravel,
   reassignIdleEntry,
   startProjectByNumber,
   switchToIdle,
@@ -174,6 +175,18 @@ describe('switchToTravel / endTravel (Fahrtzeit)', () => {
     expect(entries).toHaveLength(2);
     expect(entries.every((entry) => entry.endTime)).toBe(true);
     expect(entries.filter((entry) => entry.isTravel)).toHaveLength(1);
+  });
+
+  it('isReturnTravel: Hinfahrt ohne vorherige Projektzeit, Rückfahrt danach', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const outbound = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '07:00', endTime: '08:00', isTravel: true });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '15:00' });
+    const back = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '15:00', isTravel: true });
+    const otherDay = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '07:00', isTravel: true });
+
+    expect(await isReturnTravel(outbound)).toBe(false);
+    expect(await isReturnTravel(back)).toBe(true);
+    expect(await isReturnTravel(otherDay)).toBe(false);
   });
 
   it('Kilometer lassen sich am Fahrtzeit-Eintrag nachtragen und verschwinden, wenn die Markierung entfernt wird', async () => {
