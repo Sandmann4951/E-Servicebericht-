@@ -34,10 +34,13 @@
   // selbst als "nicht gesetzt" durchginge.
   let formPlannedQuantity = $state('');
   let formHasPlannedQuantity = $state(false);
-  // Optional - Lager (L) oder Bestellung (B), siehe MaterialItem.source. Kann
-  // auch undefined bleiben (nicht erzwungen); erneutes Antippen des bereits
-  // gewählten Buttons deselektiert ihn wieder (siehe toggleSource()).
-  let formSource = $state<MaterialItem['source']>(undefined);
+  // Lager (L) oder Bestellung (B), siehe MaterialItem.source. Neue Positionen
+  // stehen standardmäßig auf "Bestellung" (Nutzerwunsch), lassen sich aber
+  // manuell umstellen; erneutes Antippen des gewählten Buttons deselektiert
+  // ihn wieder (siehe toggleSource()). Beim Bearbeiten bleibt der
+  // gespeicherte Wert erhalten.
+  const DEFAULT_SOURCE: MaterialItem['source'] = 'bestellung';
+  let formSource = $state<MaterialItem['source']>(DEFAULT_SOURCE);
 
   let scannerOpen = $state(false);
   // Rohtext des zuletzt gescannten Codes, solange das Formular dadurch
@@ -68,7 +71,7 @@
     formArticleNumber = '';
     formPlannedQuantity = '';
     formHasPlannedQuantity = false;
-    formSource = undefined;
+    formSource = DEFAULT_SOURCE;
     editingId = undefined;
     showForm = false;
     unitTouched = false;
@@ -304,7 +307,7 @@
       <input type="text" bind:value={formArticleNumber} />
     </label>
     <div class="source-field">
-      <span class="source-label">Lager / Bestellung (optional)</span>
+      <span class="source-label">Lager / Bestellung</span>
       <div class="source-toggle">
         <button type="button" class:active={formSource === 'lager'} onclick={() => toggleSource('lager')}>
           L · Lager
