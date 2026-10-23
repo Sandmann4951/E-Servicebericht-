@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import CFB from 'cfb';
 import JSZip from 'jszip';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildReportDocx, suggestedFileName } from '../../lib/export/docxExport';
@@ -108,73 +107,6 @@ async function build(data: FullReport): Promise<Blob> {
   return buildReportDocx(data, templateBytes);
 }
 
-/**
- * Eigenständiger, von `timesheetEmbed.ts` UNABHÄNGIGER Mini-BIFF8-Leser nur
- * für diesen Test: liest aus der eingebetteten Excel-Arbeitsmappe die
- * Datenzeilen 2-16 (Spalten 0/1/4/5 - Datum/Techniker/von/bis) aus, um
- * tatsächlich zu beweisen, dass die Werte an der richtigen Stelle in der
- * richtigen Zelle stehen, statt nur die Produktionslogik erneut aufzurufen.
- */
-function readEmbeddedTimesheetRows(
-  xlsBytes: Uint8Array
-): Map<number, { date?: string; technician?: string; start?: number; end?: number }> {
-  // BOF/Zell-Records liegen NICHT direkt in den rohen OLE2-Containerbytes,
-  // sondern im "Workbook"-Stream darin - deshalb zuerst per `cfb` entpacken.
-  const container = CFB.parse(xlsBytes);
-  const workbookEntry = container.FileIndex.find((entry) => entry.name === 'Workbook');
-  if (!workbookEntry) throw new Error('"Workbook"-Stream nicht im OLE2-Container gefunden');
-  const workbookBytes = Uint8Array.from(workbookEntry.content);
-
-  const view = new DataView(workbookBytes.buffer, workbookBytes.byteOffset, workbookBytes.byteLength);
-  let pos = 0;
-  let bofSeen = 0;
-  let worksheetStart = -1;
-  while (pos + 4 <= workbookBytes.length) {
-    const type = view.getUint16(pos, true);
-    const len = view.getUint16(pos + 2, true);
-    if (type === 0x0809) {
-      bofSeen++;
-      if (bofSeen === 2) {
-        worksheetStart = pos;
-        break;
-      }
-    }
-    pos += 4 + len;
-  }
-  if (worksheetStart < 0) throw new Error('Worksheet-BOF nicht gefunden');
-
-  const rows = new Map<number, { date?: string; technician?: string; start?: number; end?: number }>();
-  pos = worksheetStart;
-  while (pos + 4 <= workbookBytes.length) {
-    const type = view.getUint16(pos, true);
-    const len = view.getUint16(pos + 2, true);
-    const bodyStart = pos + 4;
-    if (type === 0x000a) break; // EOF
-    if (type === 0x0204 /* LABEL */) {
-      const row = view.getUint16(bodyStart, true);
-      const col = view.getUint16(bodyStart + 2, true);
-      const cch = view.getUint16(bodyStart + 6, true);
-      const chars = new Uint8Array(workbookBytes.buffer, workbookBytes.byteOffset + bodyStart + 9, cch);
-      const text = String.fromCharCode(...chars);
-      if (col === 0) rows.set(row, { ...rows.get(row), date: text });
-      if (col === 1) rows.set(row, { ...rows.get(row), technician: text });
-    } else if (type === 0x0203 /* NUMBER */) {
-      const row = view.getUint16(bodyStart, true);
-      const col = view.getUint16(bodyStart + 2, true);
-      const value = view.getFloat64(bodyStart + 6, true);
-      if (col === 4) rows.set(row, { ...rows.get(row), start: value });
-      if (col === 5) rows.set(row, { ...rows.get(row), end: value });
-    }
-    pos = bodyStart + len;
-  }
-  return rows;
-}
-
-function excelTimeFraction(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return (h * 3600 + m * 60) / 86400;
-}
-
 describe('buildReportDocx', () => {
   it('erzeugt einen nicht-leeren Blob mit docx-Mimetype', async () => {
     const blob = await build(fakeFullReport());
@@ -198,8 +130,9 @@ describe('buildReportDocx', () => {
     const xml = await documentXmlOf(blob);
     expect(xml).toContain('2026-TEST-777');
     expect(xml).toContain('Testkunde GmbH');
-    // Berichtersteller UND Techniker (Unterschriftenzeile) - derselbe Name an beiden Stellen.
-    expect(xml.match(/Erika Musterfrau/g)?.length).toBe(2);
+    // Berichtersteller, Techniker (Unterschriftenzeile) und die Techniker-Spalte
+    // der Zeiten-Tabelle (ein Tag mit Zeiteintrag) - derselbe Name an allen drei Stellen.
+    expect(xml.match(/Erika Musterfrau/g)?.length).toBe(3);
     expect(xml).toContain('Herr Ansprechpartner');
     expect(xml).toContain('Testprojekt Beschreibung');
     expect(xml).toContain('Testbeschreibung der Arbeiten');
@@ -375,6 +308,8 @@ describe('buildReportDocx', () => {
   it('zeigt in der "Beschreibung"-Spalte die eigene Foto-Notiz statt des Zeitstempels', async () => {
     const blob = await build(
       fakeFullReport({
+        // Ohne Zeiteinträge, damit das Datum nicht über die Zeiten-Tabelle ins Dokument kommt.
+        timeEntries: [],
         photos: [fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: 'Sicherung vor dem Austausch' })]
       })
     );
@@ -384,7 +319,9 @@ describe('buildReportDocx', () => {
   });
 
   it('lässt die "Beschreibung"-Spalte ohne eigene Foto-Notiz bewusst leer (kein Zeitstempel-Fallback)', async () => {
-    const blob = await build(fakeFullReport({ photos: [fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: undefined })] }));
+    const blob = await build(
+      fakeFullReport({ timeEntries: [], photos: [fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: undefined })] })
+    );
     const xml = await documentXmlOf(blob);
     expect(xml).not.toContain('10.08.2026');
   });
@@ -479,94 +416,54 @@ describe('buildReportDocx', () => {
     });
   });
 
-  describe('eingebettete "Zeiten"-Excel-Tabelle (OLE-Objekt, kein Word-Tabellenfeld)', () => {
-    it('trägt Datum/von/bis mehrerer Zeiteinträge in die richtigen Zeilen/Zellen der eingebetteten Arbeitsmappe ein', async () => {
-      const blob = await build(
-        fakeFullReport({
-          timeEntries: [
-            fakeTimeEntry({ id: 't1', date: '2026-10-19', startTime: '08:00', endTime: '16:30' }),
-            fakeTimeEntry({ id: 't2', date: '2026-10-20', startTime: '07:30', endTime: '15:45' }),
-            // Pausen-Einträge haben in der echten Zeiterfassung keine feste
-            // Zeile in dieser Tabelle und müssen übersprungen werden.
-            fakeTimeEntry({ id: 't3', date: '2026-10-20', startTime: '12:00', endTime: '12:30', isBreak: true })
-          ]
-        })
+  describe('"Zeiten"-Tabelle (Word-Tabelle statt eingebettetem Excel)', () => {
+    /** Texte aller Zellen der Zeiten-Tabelle, Zeile für Zeile. */
+    async function timesheetTableRows(blob: Blob): Promise<string[][]> {
+      const xml = await documentXmlOf(blob);
+      const tables = xml.match(/<w:tbl>[^]*?<\/w:tbl>/g) ?? [];
+      const table = tables.find((candidate) => candidate.includes('>Arbeitszeit<'));
+      if (!table) throw new Error('Zeiten-Tabelle nicht gefunden');
+      return (table.match(/<w:tr>[^]*?<\/w:tr>/g) ?? []).map((rowXml) =>
+        (rowXml.match(/<w:tc>[^]*?<\/w:tc>/g) ?? []).map((cellXml) =>
+          [...cellXml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')
+        )
       );
+    }
+
+    it('enthält kein eingebettetes Excel-Objekt mehr', async () => {
+      const blob = await build(fakeFullReport());
       const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-      const xlsFile = zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls');
-      expect(xlsFile).not.toBeNull();
-      const xlsBytes = await xlsFile!.async('uint8array');
-
-      // Äußerer OLE2-Container muss weiterhin gültig sein (CFB.parse wirft bei Strukturschäden).
-      const container = CFB.parse(xlsBytes);
-      expect(container.FileIndex.some((entry) => entry.name === 'Workbook')).toBe(true);
-
-      const rows = readEmbeddedTimesheetRows(xlsBytes);
-      expect(rows.get(2)?.date).toBe('19.10.2026');
-      expect(rows.get(2)?.start).toBeCloseTo(excelTimeFraction('08:00'), 10);
-      expect(rows.get(2)?.end).toBeCloseTo(excelTimeFraction('16:30'), 10);
-      expect(rows.get(3)?.date).toBe('20.10.2026');
-      expect(rows.get(3)?.start).toBeCloseTo(excelTimeFraction('07:30'), 10);
-      expect(rows.get(3)?.end).toBeCloseTo(excelTimeFraction('15:45'), 10);
-      // Der Pausen-Eintrag darf keine dritte Datenzeile belegt haben.
-      expect(rows.has(4)).toBe(false);
+      expect(zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')).toBeNull();
+      expect(await documentXmlOf(blob)).not.toContain('<w:object');
     });
 
-    it('trägt den Monteur-Namen (report.technicianName) in die eigene "Techniker"-Spalte jeder befüllten Zeile ein', async () => {
+    // 19.10.: 1 Std. Hinfahrt + 8,5 Std. Arbeit + 1 Std. Rückfahrt = 10,5 Std. -> 2,5 Ü-Std.
+    it('trägt eine Zeile pro Tag mit Fahrzeit, Km, von/bis, Stunden, Ü-Std. und Pause ein, darunter die Gesamt-Zeile', async () => {
       const blob = await build(
         fakeFullReport({
           report: fakeReport({ technicianName: 'Daniel Sander' }),
           timeEntries: [
-            fakeTimeEntry({ id: 't1', date: '2026-10-19', startTime: '08:00', endTime: '16:30' }),
-            fakeTimeEntry({ id: 't2', date: '2026-10-20', startTime: '07:30', endTime: '15:45' })
-          ]
+            fakeTimeEntry({ id: 'a', date: '2026-10-19', startTime: '07:00', endTime: '08:00', durationMinutes: 60, isTravel: true, kilometers: 42 }),
+            fakeTimeEntry({ id: 'b', date: '2026-10-19', startTime: '08:00', endTime: '12:00', durationMinutes: 240 }),
+            fakeTimeEntry({ id: 'c', date: '2026-10-19', startTime: '12:30', endTime: '17:00', durationMinutes: 270 }),
+            fakeTimeEntry({ id: 'd', date: '2026-10-19', startTime: '17:00', endTime: '18:00', durationMinutes: 60, isTravel: true, kilometers: 40 }),
+            fakeTimeEntry({ id: 'e', date: '2026-10-20', startTime: '08:00', endTime: '12:00', durationMinutes: 240 })
+          ],
+          breaks: [fakeTimeEntry({ id: 'p', reportId: undefined, date: '2026-10-19', startTime: '12:00', endTime: '12:30', durationMinutes: 30, isBreak: true })]
         })
       );
-      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-      const xlsBytes = await zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')!.async('uint8array');
-      const rows = readEmbeddedTimesheetRows(xlsBytes);
-      expect(rows.get(2)?.technician).toBe('Daniel Sander');
-      expect(rows.get(3)?.technician).toBe('Daniel Sander');
+      const rows = await timesheetTableRows(blob);
+      // 2 Kopfzeilen, 2 Tage, Gesamt
+      expect(rows).toHaveLength(5);
+      expect(rows[2]).toEqual(['19.10.2026', 'Daniel Sander', '1,00', '42', '08:00', '17:00', '8,50', '2,50', '0,50', '1,00', '40']);
+      expect(rows[3]).toEqual(['20.10.2026', 'Daniel Sander', '', '', '08:00', '12:00', '4,00', '', '', '', '']);
+      expect(rows[4]).toEqual(['Gesamt:', '1,00', '42', '', '', '12,50', '2,50', '', '1,00', '40']);
     });
 
-    it('lässt die "Techniker"-Spalte leer, wenn der Bericht keinen Techniker-Namen hat', async () => {
-      const blob = await build(
-        fakeFullReport({
-          report: fakeReport({ technicianName: undefined }),
-          timeEntries: [fakeTimeEntry({ id: 't1', date: '2026-10-19', startTime: '08:00', endTime: '16:30' })]
-        })
-      );
-      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-      const xlsBytes = await zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')!.async('uint8array');
-      const rows = readEmbeddedTimesheetRows(xlsBytes);
-      expect(rows.get(2)?.technician).toBeUndefined();
-    });
-
-    it('lässt die eingebettete Arbeitsmappe unverändert, wenn keine (nutzbaren) Zeiteinträge vorhanden sind', async () => {
-      const originalXls = (
-        await (await JSZip.loadAsync(templateBytes)).file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')!.async('uint8array')
-      ).slice();
-      const blob = await build(
-        fakeFullReport({
-          timeEntries: [fakeTimeEntry({ startTime: undefined, endTime: undefined })]
-        })
-      );
-      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-      const xlsBytes = await zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')!.async('uint8array');
-      expect(xlsBytes).toEqual(originalXls);
-    });
-
-    it('begrenzt die eingebetteten Zeiteinträge auf die 15 vorformatierten Zeilen der Vorlage, ohne zu werfen', async () => {
-      const manyEntries = Array.from({ length: 18 }, (_, i) =>
-        fakeTimeEntry({ id: `t${i}`, date: `2026-10-${String(1 + i).padStart(2, '0')}`, startTime: '08:00', endTime: '16:00' })
-      );
-      const blob = await build(fakeFullReport({ timeEntries: manyEntries }));
-      const zip = await JSZip.loadAsync(await blob.arrayBuffer());
-      const xlsBytes = await zip.file('word/embeddings/Microsoft_Excel_97-2003_Worksheet.xls')!.async('uint8array');
-      const rows = readEmbeddedTimesheetRows(xlsBytes);
-      // Zeilen 2-16 (0-indiziert) = die 15 vorhandenen Datenzeilen, nicht mehr.
-      expect(rows.size).toBe(15);
-      expect(rows.has(17)).toBe(false);
+    it('zeigt ohne Zeiteinträge nur Kopf- und Gesamt-Zeile', async () => {
+      const rows = await timesheetTableRows(await build(fakeFullReport({ timeEntries: [] })));
+      expect(rows).toHaveLength(3);
+      expect(rows[2][0]).toBe('Gesamt:');
     });
   });
 });

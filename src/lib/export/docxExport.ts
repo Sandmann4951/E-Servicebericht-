@@ -5,7 +5,7 @@ import type { MaterialItem, Photo, ServiceReport } from '../db/types';
 import { splitContactPersonAndPhone } from '../utils/contactPerson';
 import { formatDateDE, todayISODate } from '../utils/date';
 import type { FullReport } from './getFullReport';
-import { injectTimeEntries } from './timesheetEmbed';
+import { buildTimesheetRows } from './timesheetRows';
 
 /**
  * Word-Export auf Basis der offiziellen ELSA-Servicebericht-Vorlage (vom
@@ -88,12 +88,15 @@ import { injectTimeEntries } from './timesheetEmbed';
  * eingetragene Notiz bleibt die Spalte bewusst leer (kein Zeitstempel-
  * Fallback mehr, ausdrücklicher Nutzerwunsch).
  *
- * ZEITEN: Die "Zeiten"-Tabelle in der Vorlage ist kein Word-Tabellenfeld,
- * sondern ein eingebettetes Excel-97-2003-Arbeitsblatt (OLE-Objekt) - Details
- * zum Mechanismus, zur Zellzuordnung und zu einer bewusst in Kauf genommenen,
- * klar zu kommunizierenden Einschränkung (zwischengespeicherte Formel-
- * Ergebnisse/Vorschaubild werden erst beim Öffnen in echtem Excel aktuell)
- * siehe Dateikommentar in `timesheetEmbed.ts`.
+ * ZEITEN: Die "Zeiten"-Tabelle war ursprünglich ein eingebettetes
+ * Excel-Arbeitsblatt (OLE-Objekt). Auf Nutzerwunsch wurde es in der Vorlage
+ * durch eine normale Word-Tabelle mit denselben Spalten ersetzt (Datum,
+ * Techniker, Anfahrt Fahrzeit/Km, Arbeitszeit von/bis/Stunden/Ü-Std./Pause,
+ * Abfahrt Fahrzeit/Km, darunter "Gesamt:"). Die Datenzeile ist ein
+ * docxtemplater-Zeilen-Loop (`{#timeRows}` ... `{/timeRows}`), die
+ * Gesamt-Zeile nutzt `{total...}`-Tags. Alle Werte rechnet die App selbst
+ * (siehe timesheetRows.ts), es gibt also keine Formeln mehr, die erst in
+ * Excel neu berechnet werden müssten, und keine Obergrenze an Zeilen.
  *
  * UNTERSCHRIFT: Die Vorlage sieht für die Kunden-Unterschrift nur eine
  * Zeile für den gedruckten Namen vor ("Namen in Druckschrift (Für
@@ -189,6 +192,16 @@ function buildTemplateData(data: FullReport): Record<string, unknown> {
     exportDate: formatDateDE(todayISODate()),
     materials: materialItems.map(materialRowData)
   };
+  // Zeiten-Tabelle: eine Zeile pro Tag (`{#timeRows}`-Loop) + "Gesamt"-Zeile
+  // (`{total...}`-Tags) - alle Werte fertig berechnet, siehe timesheetRows.ts.
+  const timesheet = buildTimesheetRows(data.timeEntries, data.breaks ?? [], report.technicianName);
+  templateData.timeRows = timesheet.rows;
+  templateData.totalOutboundTravel = timesheet.totals.outboundTravel;
+  templateData.totalOutboundKm = timesheet.totals.outboundKm;
+  templateData.totalHours = timesheet.totals.hours;
+  templateData.totalOvertime = timesheet.totals.overtime;
+  templateData.totalReturnTravel = timesheet.totals.returnTravel;
+  templateData.totalReturnKm = timesheet.totals.returnKm;
   for (let i = 0; i < MAX_PHOTOS; i++) {
     const photo = photos[i];
     // Nur die eigene Foto-Notiz - ohne eine solche bleibt die Spalte
@@ -300,7 +313,6 @@ export async function buildReportDocx(data: FullReport, templateBytes?: ArrayBuf
 
   const outZip = doc.getZip();
   await injectPhotos(outZip, data.photos.slice(0, MAX_PHOTOS));
-  await injectTimeEntries(outZip, data.timeEntries, data.report.technicianName);
 
   return outZip.generate({ type: 'blob', mimeType: DOCX_MIME_TYPE });
 }
