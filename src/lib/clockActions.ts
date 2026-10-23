@@ -315,26 +315,31 @@ export async function switchToTravel(reportId: ID): Promise<boolean> {
 }
 
 /**
- * Ist diese Fahrtzeit die Rückfahrt? Das ist der Fall, sobald am selben Tag
- * vorher schon normale Projektzeit in diesem Bericht erfasst wurde (man war
- * also bereits beim Kunden). Sonst ist es die Hinfahrt. Bestimmt in
- * TimeClock.svelte, welche Buttons während der Fahrtzeit angeboten werden:
- * Hinfahrt -> nur "Fahrtzeit beenden & einchecken", Rückfahrt -> nur
- * "Auschecken".
+ * Ist diese Fahrtzeit die Rückfahrt? Maßgeblich ist der unmittelbar
+ * vorhergehende Abschnitt dieses Berichts am selben Tag: war das normale
+ * Projektzeit (man war beim Kunden), ist es die Rückfahrt. Gab es davor
+ * nichts oder war der vorherige Abschnitt selbst eine Fahrtzeit (z.B. die
+ * Rückfahrt eines früheren Einsatzes am selben Tag), ist es wieder eine
+ * Hinfahrt. Bestimmt in TimeClock.svelte, welche Buttons während der
+ * Fahrtzeit angeboten werden: Hinfahrt -> nur "Fahrtzeit beenden &
+ * einchecken", Rückfahrt -> nur "Auschecken".
+ *
+ * Reihenfolge über Startzeit, bei gleicher Minute über createdAt - beim
+ * Wechsel Projekt -> Fahrtzeit beginnen beide Abschnitte oft in derselben
+ * Minute.
  */
-export async function isReturnTravel(entry: Pick<TimeEntry, 'id' | 'reportId' | 'date' | 'startTime'>): Promise<boolean> {
+export async function isReturnTravel(
+  entry: Pick<TimeEntry, 'id' | 'reportId' | 'date' | 'startTime' | 'createdAt'>
+): Promise<boolean> {
   if (!entry.reportId || !entry.startTime) return false;
-  const start = entry.startTime;
+  const isBefore = (other: TimeEntry): boolean =>
+    other.startTime! < entry.startTime! || (other.startTime === entry.startTime && other.createdAt < entry.createdAt);
   const entries = await listTimeEntries(entry.reportId);
-  return entries.some(
-    (other) =>
-      other.id !== entry.id &&
-      other.date === entry.date &&
-      !other.isTravel &&
-      !other.isBreak &&
-      other.startTime !== undefined &&
-      other.startTime <= start
-  );
+  const previous = entries
+    .filter((other) => other.id !== entry.id && other.date === entry.date && !other.isBreak && other.startTime && isBefore(other))
+    .sort((a, b) => a.startTime!.localeCompare(b.startTime!) || a.createdAt.localeCompare(b.createdAt))
+    .at(-1);
+  return previous !== undefined && !previous.isTravel;
 }
 
 /**
