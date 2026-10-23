@@ -3,6 +3,7 @@ import {
   addTimeEntry,
   findOverlappingTimeEntries,
   getGloballyActiveTimeEntry,
+  listTimeEntries,
   listTimeEntriesForDate,
   trimOverlappingTimeEntries,
   updateTimeEntry
@@ -311,6 +312,29 @@ export async function switchToProject(reportId: ID, options: { travel?: boolean 
  */
 export async function switchToTravel(reportId: ID): Promise<boolean> {
   return switchToProject(reportId, { travel: true });
+}
+
+/**
+ * Ist diese Fahrtzeit die Rückfahrt? Das ist der Fall, sobald am selben Tag
+ * vorher schon normale Projektzeit in diesem Bericht erfasst wurde (man war
+ * also bereits beim Kunden). Sonst ist es die Hinfahrt. Bestimmt in
+ * TimeClock.svelte, welche Buttons während der Fahrtzeit angeboten werden:
+ * Hinfahrt -> nur "Fahrtzeit beenden & einchecken", Rückfahrt -> nur
+ * "Auschecken".
+ */
+export async function isReturnTravel(entry: Pick<TimeEntry, 'id' | 'reportId' | 'date' | 'startTime'>): Promise<boolean> {
+  if (!entry.reportId || !entry.startTime) return false;
+  const start = entry.startTime;
+  const entries = await listTimeEntries(entry.reportId);
+  return entries.some(
+    (other) =>
+      other.id !== entry.id &&
+      other.date === entry.date &&
+      !other.isTravel &&
+      !other.isBreak &&
+      other.startTime !== undefined &&
+      other.startTime <= start
+  );
 }
 
 /**
