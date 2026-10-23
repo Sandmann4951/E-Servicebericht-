@@ -69,6 +69,17 @@ export async function listTimeEntriesForDate(date: string): Promise<TimeEntry[]>
 }
 
 /**
+ * Alle Pausen-Einträge (isBreak) an den angegebenen Tagen - Pausen haben
+ * keine reportId, lassen sich also nicht über einen Bericht laden. Genutzt
+ * für die Pause-Spalte der Zeiten-Tabelle im Word-Export.
+ */
+export async function listBreaksForDates(dates: Iterable<string>): Promise<TimeEntry[]> {
+  const db = await getDB();
+  const perDate = await Promise.all([...new Set(dates)].map((date) => db.getAllFromIndex('timeEntries', 'date', date)));
+  return perDate.flat().filter((entry) => entry.isBreak);
+}
+
+/**
  * Alle abgeschlossenen (mit endTime), noch keinem Projekt zugeordneten
  * Leerlaufzeit-Einträge - für die nachträgliche Zuordnung. Die aktuell noch
  * laufende Leerlaufzeit (falls vorhanden) wird bewusst ausgeschlossen, da sie

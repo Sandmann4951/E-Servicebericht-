@@ -1,9 +1,11 @@
-import { getReport, listTimeEntries, listMaterialItems, listPhotos } from '../db';
+import { getReport, listBreaksForDates, listTimeEntries, listMaterialItems, listPhotos } from '../db';
 import type { ServiceReport, TimeEntry, MaterialItem, Photo, ID } from '../db/types';
 
 export interface FullReport {
   report: ServiceReport;
   timeEntries: TimeEntry[];
+  /** Pausen an den Tagen dieses Berichts (Pausen haben keine reportId) - für die Pause-Spalte der Zeiten-Tabelle. */
+  breaks?: TimeEntry[];
   materialItems: MaterialItem[];
   photos: Photo[];
 }
@@ -19,5 +21,7 @@ export async function getFullReport(id: ID): Promise<FullReport | undefined> {
     listPhotos(id)
   ]);
 
-  return { report, timeEntries, materialItems, photos };
+  const breaks = await listBreaksForDates(timeEntries.map((entry) => entry.date));
+
+  return { report, timeEntries, breaks, materialItems, photos };
 }
