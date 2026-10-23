@@ -157,6 +157,25 @@ describe('switchToTravel / endTravel (Fahrtzeit)', () => {
     expect(closedTravel?.endTime).toBeTruthy();
   });
 
+  it('Rückfahrt: aus der Projektzeit Fahrtzeit starten, danach auschecken', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await switchToProject(report.id);
+
+    expect(await switchToTravel(report.id)).toBe(true);
+    const travel = await getGloballyActiveTimeEntry();
+    expect(travel?.reportId).toBe(report.id);
+    expect(travel?.isTravel).toBe(true);
+
+    await switchToIdle();
+    const idle = await getGloballyActiveTimeEntry();
+    expect(idle?.reportId).toBeUndefined();
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(2);
+    expect(entries.every((entry) => entry.endTime)).toBe(true);
+    expect(entries.filter((entry) => entry.isTravel)).toHaveLength(1);
+  });
+
   it('Kilometer lassen sich am Fahrtzeit-Eintrag nachtragen und verschwinden, wenn die Markierung entfernt wird', async () => {
     const report = await createReport({ projectNumber: 'A' });
     const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '07:00', endTime: '08:00', isTravel: true });

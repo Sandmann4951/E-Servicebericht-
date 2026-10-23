@@ -51,15 +51,28 @@
     }
   }
 
+  /**
+   * Wechselt innerhalb dieses Projekts zwischen Arbeit und Fahrtzeit:
+   * "Fahrtzeit starten" (Rückfahrt) aus der Projektzeit heraus bzw.
+   * "Einchecken" (Ankunft) aus einer laufenden Fahrtzeit heraus.
+   */
+  async function switchMode(travel: boolean): Promise<void> {
+    if (busy || !activeEntry || locked) return;
+    busy = true;
+    try {
+      if (!(await (travel ? switchToTravel(reportId) : endTravel(reportId)))) return;
+      await load();
+      onChanged();
+    } finally {
+      busy = false;
+    }
+  }
+
   async function clockOut(): Promise<void> {
     if (busy || !activeEntry || locked) return;
     busy = true;
     try {
-      if (activeEntry.isTravel) {
-        // Fahrtzeit beenden = beim Kunden angekommen - direkt normal ins
-        // Projekt einchecken, die Fahrtzeit bleibt als eigener Eintrag stehen.
-        await endTravel(reportId);
-      } else if (activeEntry.workDayId) {
+      if (activeEntry.workDayId) {
         // Über die Tagesstempeluhr erfasst - Leerlaufzeit läuft weiter, statt
         // einfach nur zu schließen (Tag ist ja weiterhin aktiv).
         await switchToIdle();
@@ -86,16 +99,25 @@
         </span>
       </div>
       {#if !locked}
-        {#if activeEntry.isTravel}
-          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Fahrtzeit beenden &amp; einchecken</button>
-        {:else}
-          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
-        {/if}
+        <!--
+          Während der Fahrtzeit: "Einchecken" (Ankunft beim Kunden) oder
+          "Auschecken" (Rückfahrt beendet). Während der Projektzeit:
+          "Auschecken" oder "Fahrtzeit starten" für die Rückfahrt.
+        -->
+        <div class="button-row">
+          {#if activeEntry.isTravel}
+            <button type="button" class="clock-in" onclick={() => switchMode(false)} disabled={busy}><Icon name="play" />Einchecken</button>
+            <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+          {:else}
+            <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+            <button type="button" class="clock-in travel" onclick={() => switchMode(true)} disabled={busy}><Icon name="truck" />Fahrtzeit starten</button>
+          {/if}
+        </div>
       {/if}
     {:else if locked}
       <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>
     {:else}
-      <div class="clock-in-row">
+      <div class="button-row">
         <button type="button" class="clock-in" onclick={() => clockIn()} disabled={busy}><Icon name="play" />Einchecken</button>
         <button type="button" class="clock-in travel" onclick={() => clockIn(true)} disabled={busy}><Icon name="truck" />Fahrtzeit</button>
       </div>
@@ -123,7 +145,7 @@
     font-size: 1.05rem;
   }
 
-  .clock-in-row {
+  .button-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-2);
