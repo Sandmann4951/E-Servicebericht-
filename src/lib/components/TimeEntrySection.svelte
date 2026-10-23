@@ -318,7 +318,7 @@
               {@render entryForm()}
             {:else if locked}
               <div class="row-main">
-                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${entry.kilometers} km`}{/if}</span>{/if}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
@@ -332,7 +332,7 @@
               </div>
             {:else}
               <button type="button" class="row-main" onclick={() => startEdit(entry)}>
-                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${entry.kilometers} km`}{/if}</span>{/if}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
