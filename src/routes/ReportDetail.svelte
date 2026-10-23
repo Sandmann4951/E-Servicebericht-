@@ -56,6 +56,11 @@
 
   let timeEntryCount = $state(0);
   let totalDurationMinutes = $state(0);
+  // Laufende Minuten des aktuell offenen Abschnitts (von TimeClock gemeldet) -
+  // damit "Zeit gesamt" und der Mannstunden-Balken schon während des
+  // Eingecheckt-Seins live mitlaufen, nicht erst nach dem Auschecken.
+  let runningMinutes = $state(0);
+  const liveTotalMinutes = $derived(totalDurationMinutes + runningMinutes);
   let materialItemCount = $state(0);
   let photoCount = $state(0);
 
@@ -118,7 +123,7 @@
   const laborBudget = $derived.by(() => {
     const planned = parsePlannedLaborHours();
     if (planned === undefined) return undefined;
-    const usedHours = totalDurationMinutes / 60;
+    const usedHours = liveTotalMinutes / 60;
     const ratio = usedHours / planned;
     const level: 'ok' | 'warn' | 'over' = ratio > 1 ? 'over' : ratio >= 0.8 ? 'warn' : 'ok';
     return { usedHours, planned, ratio, level };
@@ -807,11 +812,11 @@
         {#if activeTab === 'übersicht'}
           <div class="overview">
             {#if reportId}
-              <TimeClock {reportId} {locked} onChanged={refreshSummary} />
+              <TimeClock {reportId} {locked} onChanged={refreshSummary} bind:runningMinutes />
             {/if}
             <div class="stats">
               <div class="stat"><strong>{timeEntryCount}</strong><span>Tage</span></div>
-              <div class="stat"><strong>{formatDurationMinutes(totalDurationMinutes)}</strong><span>Zeit gesamt</span></div>
+              <div class="stat"><strong>{formatDurationMinutes(liveTotalMinutes)}</strong><span>Zeit gesamt</span></div>
               <div class="stat"><strong>{materialItemCount}</strong><span>Material-Positionen</span></div>
               <div class="stat"><strong>{photoCount}</strong><span>Fotos</span></div>
             </div>
