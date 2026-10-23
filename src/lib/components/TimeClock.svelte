@@ -5,7 +5,23 @@
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
   import Icon from './Icon.svelte';
 
-  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
+  let {
+    reportId,
+    locked = false,
+    onChanged,
+    runningMinutes = $bindable(0)
+  }: {
+    reportId: string;
+    locked?: boolean;
+    onChanged: () => void;
+    /**
+     * Bisher gelaufene Minuten des gerade offenen Abschnitts dieses Berichts
+     * (0, wenn nicht eingecheckt) - ReportDetail.svelte rechnet sie live auf
+     * "Zeit gesamt" und den Mannstunden-Balken auf, die sonst erst beim
+     * Auschecken (abgeschlossener Eintrag) nach oben gehen würden.
+     */
+    runningMinutes?: number;
+  } = $props();
 
   let activeEntry = $state<TimeEntry | undefined>(undefined);
   /** Nur bei laufender Fahrtzeit relevant: Rückfahrt (nur noch Auschecken) statt Hinfahrt (nur Einchecken). */
@@ -40,6 +56,10 @@
     tick;
     if (!activeEntry?.startTime) return undefined;
     return computeDurationMinutes(activeEntry.startTime, nowHHmm());
+  });
+
+  $effect(() => {
+    runningMinutes = elapsedMinutes ?? 0;
   });
 
   async function clockIn(travel = false): Promise<void> {
