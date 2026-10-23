@@ -189,6 +189,39 @@ describe('switchToTravel / endTravel (Fahrtzeit)', () => {
     expect(await isReturnTravel(otherDay)).toBe(false);
   });
 
+  it('isReturnTravel: nach Hin- und Rückfahrt ist die nächste Fahrt am selben Tag wieder eine Hinfahrt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '07:00', endTime: '08:00', isTravel: true });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '11:00' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '11:00', endTime: '12:00', isTravel: true });
+    const secondOutbound = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '13:00', isTravel: true });
+    expect(await isReturnTravel(secondOutbound)).toBe(false);
+
+    await updateTimeEntry(secondOutbound.id, { endTime: '14:00' });
+    await addTimeEntry(report.id, { date: '2026-08-10', startTime: '14:00', endTime: '16:00' });
+    const secondReturn = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '16:00', isTravel: true });
+    expect(await isReturnTravel(secondReturn)).toBe(true);
+  });
+
+  it('isReturnTravel: echter Ablauf über die Stempeluhr (Wechsel in derselben Minute)', async () => {
+    // Zwischen zwei Klicks vergeht in der App immer etwas Zeit - hier
+    // nachgestellt, damit createdAt (Millisekunden) sich unterscheidet.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+    const report = await createReport({ projectNumber: 'A' });
+    await switchToTravel(report.id);
+    expect(await isReturnTravel((await getGloballyActiveTimeEntry())!)).toBe(false);
+    await tick();
+    await endTravel(report.id);
+    await tick();
+    await switchToTravel(report.id);
+    expect(await isReturnTravel((await getGloballyActiveTimeEntry())!)).toBe(true);
+    await tick();
+    await switchToIdle();
+    await tick();
+    await switchToTravel(report.id);
+    expect(await isReturnTravel((await getGloballyActiveTimeEntry())!)).toBe(false);
+  });
+
   it('Kilometer lassen sich am Fahrtzeit-Eintrag nachtragen und verschwinden, wenn die Markierung entfernt wird', async () => {
     const report = await createReport({ projectNumber: 'A' });
     const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '07:00', endTime: '08:00', isTravel: true });
