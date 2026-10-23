@@ -303,9 +303,11 @@ export async function switchToProject(reportId: ID, options: { travel?: boolean 
 /**
  * Checkt als Fahrtzeit in ein Projekt ein ("Fahrtzeit"-Button neben
  * "Einchecken" im Bericht) - verhält sich exakt wie switchToProject(), nur
- * dass der neue Abschnitt als Fahrtzeit markiert wird. Beim Beenden der
- * Fahrtzeit (endTravel()) wird automatisch normal ins selbe Projekt
- * eingecheckt.
+ * dass der neue Abschnitt als Fahrtzeit markiert wird. Auch aus einer
+ * laufenden Projektzeit heraus nutzbar ("Fahrtzeit starten" für die
+ * Rückfahrt). Danach geht es entweder mit endTravel() normal ins selbe
+ * Projekt weiter (Ankunft) oder mit switchToIdle() aus dem Projekt heraus
+ * (Rückfahrt beendet).
  */
 export async function switchToTravel(reportId: ID): Promise<boolean> {
   return switchToProject(reportId, { travel: true });
