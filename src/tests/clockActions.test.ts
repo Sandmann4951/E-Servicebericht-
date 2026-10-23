@@ -8,10 +8,12 @@ import {
   autoCheckOutIfExceeded,
   checkInDay,
   checkOutDay,
+  endTravel,
   reassignIdleEntry,
   startProjectByNumber,
   switchToIdle,
   switchToProject,
+  switchToTravel,
   updateManualIdleTime,
   updateManualTimeEntry
 } from '../lib/clockActions';
@@ -132,6 +134,39 @@ describe('switchToProject', () => {
 
     expect(confirmSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('switchToTravel / endTravel (Fahrtzeit)', () => {
+  it('checkt als Fahrtzeit ein und beim Beenden automatisch normal ins selbe Projekt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+
+    expect(await switchToTravel(report.id)).toBe(true);
+    const travel = await getGloballyActiveTimeEntry();
+    expect(travel?.reportId).toBe(report.id);
+    expect(travel?.isTravel).toBe(true);
+
+    expect(await endTravel(report.id)).toBe(true);
+    const active = await getGloballyActiveTimeEntry();
+    expect(active?.reportId).toBe(report.id);
+    expect(active?.isTravel).toBeUndefined();
+
+    const entries = await listTimeEntries(report.id);
+    expect(entries).toHaveLength(2);
+    const closedTravel = entries.find((entry) => entry.isTravel);
+    expect(closedTravel?.endTime).toBeTruthy();
+  });
+
+  it('Kilometer lassen sich am Fahrtzeit-Eintrag nachtragen und verschwinden, wenn die Markierung entfernt wird', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '07:00', endTime: '08:00', isTravel: true });
+
+    const withKm = await updateTimeEntry(entry.id, { kilometers: 42 });
+    expect(withKm?.kilometers).toBe(42);
+    expect(withKm?.durationMinutes).toBe(60);
+
+    const cleared = await updateTimeEntry(entry.id, { isTravel: false });
+    expect(cleared?.kilometers).toBeUndefined();
   });
 });
 

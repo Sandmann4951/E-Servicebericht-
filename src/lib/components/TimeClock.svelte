@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getActiveTimeEntry, updateTimeEntry } from '../db/timeEntries';
   import type { TimeEntry } from '../db/types';
-  import { switchToIdle, switchToProject } from '../clockActions';
+  import { endTravel, switchToIdle, switchToProject, switchToTravel } from '../clockActions';
   import { computeDurationMinutes, formatDurationMinutes, nowHHmm } from '../utils/date';
   import Icon from './Icon.svelte';
 
@@ -39,11 +39,11 @@
     return computeDurationMinutes(activeEntry.startTime, nowHHmm());
   });
 
-  async function clockIn(): Promise<void> {
+  async function clockIn(travel = false): Promise<void> {
     if (busy || activeEntry || locked) return;
     busy = true;
     try {
-      if (!(await switchToProject(reportId))) return;
+      if (!(await (travel ? switchToTravel(reportId) : switchToProject(reportId)))) return;
       await load();
       onChanged();
     } finally {
@@ -55,7 +55,11 @@
     if (busy || !activeEntry || locked) return;
     busy = true;
     try {
-      if (activeEntry.workDayId) {
+      if (activeEntry.isTravel) {
+        // Fahrtzeit beenden = beim Kunden angekommen - direkt normal ins
+        // Projekt einchecken, die Fahrtzeit bleibt als eigener Eintrag stehen.
+        await endTravel(reportId);
+      } else if (activeEntry.workDayId) {
         // Über die Tagesstempeluhr erfasst - Leerlaufzeit läuft weiter, statt
         // einfach nur zu schließen (Tag ist ja weiterhin aktiv).
         await switchToIdle();
@@ -74,20 +78,27 @@
 {#if !loading}
   <div class="clock">
     {#if activeEntry}
-      <div class="active-badge">
+      <div class="active-badge" class:travel={activeEntry.isTravel}>
         <span class="dot"></span>
         <span>
-          Eingecheckt seit {activeEntry.startTime}
+          {activeEntry.isTravel ? 'Fahrtzeit seit' : 'Eingecheckt seit'} {activeEntry.startTime}
           {#if elapsedMinutes !== undefined}· {formatDurationMinutes(elapsedMinutes)}{/if}
         </span>
       </div>
       {#if !locked}
-        <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+        {#if activeEntry.isTravel}
+          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Fahrtzeit beenden &amp; einchecken</button>
+        {:else}
+          <button type="button" class="clock-out" onclick={clockOut} disabled={busy}><Icon name="stop" />Auschecken</button>
+        {/if}
       {/if}
     {:else if locked}
       <p class="locked-hint">Bericht ist gesperrt – Zeiterfassung nicht mehr möglich.</p>
     {:else}
-      <button type="button" class="clock-in" onclick={clockIn} disabled={busy}><Icon name="play" />Einchecken</button>
+      <div class="clock-in-row">
+        <button type="button" class="clock-in" onclick={() => clockIn()} disabled={busy}><Icon name="play" />Einchecken</button>
+        <button type="button" class="clock-in travel" onclick={() => clockIn(true)} disabled={busy}><Icon name="truck" />Fahrtzeit</button>
+      </div>
     {/if}
   </div>
 {/if}
@@ -112,9 +123,19 @@
     font-size: 1.05rem;
   }
 
+  .clock-in-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
   .clock-in {
     background: var(--color-success);
     color: var(--color-primary-contrast);
+  }
+
+  .clock-in.travel {
+    background: var(--color-primary);
   }
 
   .clock-out {
@@ -144,6 +165,16 @@
     padding: var(--space-3) var(--space-4);
     font-weight: 600;
     font-size: 0.9rem;
+  }
+
+  .active-badge.travel {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary);
+  }
+
+  .active-badge.travel .dot {
+    background: var(--color-primary);
   }
 
   .dot {

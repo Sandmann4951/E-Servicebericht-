@@ -130,6 +130,17 @@ export interface TimeEntry {
    * rückgängig macht.
    */
   trimRecords?: TimeEntryTrimRecord[];
+  /**
+   * Markiert einen Fahrtzeit-Abschnitt (über den "Fahrtzeit"-Button im
+   * Bericht eingecheckt, siehe clockActions.switchToTravel(), oder manuell im
+   * Zeiten-Tab als Fahrtzeit erfasst). Gehört wie ein normaler
+   * Projekt-Abschnitt zum Bericht (reportId gesetzt) und zählt ganz normal
+   * als Arbeitszeit - die Markierung dient nur der Kennzeichnung in der
+   * Zeitenliste und im Word-Export. Optionales Feld, kein DB_VERSION-Bump nötig.
+   */
+  isTravel?: boolean;
+  /** Gefahrene Kilometer - nur bei Fahrtzeit-Einträgen (isTravel), beim Bearbeiten im Zeiten-Tab eintragbar. */
+  kilometers?: number;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -149,6 +160,8 @@ export interface TimeEntryTrimRecord {
   originalStartTime?: string;
   originalEndTime?: string;
   originalNote?: string;
+  originalIsTravel?: boolean;
+  originalKilometers?: number;
   /** true, wenn der Eintrag komplett im Pausenfenster lag und deshalb ganz gelöscht wurde. */
   wasDeleted: boolean;
   /** Falls der Eintrag gesplittet wurde: ID des dabei neu entstandenen zweiten Teils (wird beim Rückgängigmachen wieder gelöscht). */

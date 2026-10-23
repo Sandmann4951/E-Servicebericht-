@@ -41,7 +41,8 @@
     | 'settings'
     | 'alert-triangle'
     | 'corner-down-right'
-    | 'file-text';
+    | 'file-text'
+    | 'truck';
 
   const PATHS: Record<IconName, string> = {
     lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
@@ -51,6 +52,8 @@
     close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
     back: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
     play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+    truck:
+      '<rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
     stop: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
     'check-circle': '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
