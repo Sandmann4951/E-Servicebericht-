@@ -159,17 +159,28 @@ describe('buildReportDocx', () => {
     expect(performedWorkRun).not.toContain('Kunde war unzufrieden mit Wartezeit');
   });
 
-  it('trägt notes als versteckten Text (w:vanish) in das "Interner Bericht/Bemerkungen/Ersatzteilnummern:"-Feld ein, ohne die Formatierung/Sichtbarkeit zu verändern', async () => {
+  it('trägt notes sichtbar (kein w:vanish mehr) in das "Interner Bericht/Bemerkungen/Ersatzteilnummern:"-Feld ein, übrige Formatierung bleibt erhalten', async () => {
     const blob = await build(fakeFullReport({ report: fakeReport({ notes: 'Kunde war unzufrieden mit Wartezeit' }) }));
     const xml = await documentXmlOf(blob);
     expect(xml).toContain('Kunde war unzufrieden mit Wartezeit');
-    const run = xml.match(/<w:r[^>]*><w:rPr>[^]*?<\/w:rPr><w:t xml:space="preserve">Kunde war unzufrieden mit Wartezeit<\/w:t><\/w:r>/)?.[0];
-    expect(run, 'erwartet eine <w:rPr> unmittelbar vor dem Textlauf').toBeDefined();
-    // Die Sichtbarkeits-/Formatierungseigenschaften der Vorlage bleiben exakt erhalten.
-    expect(run).toContain('<w:vanish/>');
-    expect(run).toContain('<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>');
-    expect(run).toContain('<w:sz w:val="16"/>');
-    expect(run).toContain('<w:szCs w:val="16"/>');
+    expect(xml).toContain('Interner Bericht/Bemerkungen/Ersatzteilnummern:');
+
+    // Bewusst in einem eng begrenzten Fenster direkt VOR dem jeweiligen Text
+    // geprüft (nicht per unbegrenzt-"lazy" Regex über das gesamte Dokument -
+    // das würde bei einem Dokument mit mehreren <w:rPr>-Blöcken potenziell
+    // einen völlig anderen, viel früheren Run samt allem dazwischen treffen).
+    const valueIdx = xml.indexOf('Kunde war unzufrieden mit Wartezeit');
+    const valueWindow = xml.slice(Math.max(0, valueIdx - 300), valueIdx);
+    expect(valueWindow).toContain('<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>');
+    expect(valueWindow).toContain('<w:sz w:val="16"/>');
+    expect(valueWindow).toContain('<w:szCs w:val="16"/>');
+    // Auf Nutzerwunsch nicht mehr versteckt - w:vanish wurde aus dem Label
+    // UND dem Wertfeld entfernt (siehe docxExport.ts-Dateikommentar).
+    expect(valueWindow).not.toContain('<w:vanish/>');
+
+    const labelIdx = xml.indexOf('Interner Bericht/Bemerkungen/Ersatzteilnummern:');
+    const labelWindow = xml.slice(Math.max(0, labelIdx - 300), labelIdx);
+    expect(labelWindow).not.toContain('<w:vanish/>');
   });
 
   it('funktioniert ohne Notizen (verstecktes Feld bleibt leer, kein Fehler)', async () => {
@@ -324,6 +335,104 @@ describe('buildReportDocx', () => {
     );
     const xml = await documentXmlOf(blob);
     expect(xml).not.toContain('10.08.2026');
+  });
+
+  describe('weitere ELSA-Vorlagenfelder (Objektadresse, E-Mail, Bestellnummer, Mehrungen, Mängel, Angebot, Status-Auswahlen)', () => {
+    it('befüllt Objektadresse/Einsatzort, E-Mail und Bestellnummer/AB', async () => {
+      const blob = await build(
+        fakeFullReport({
+          report: fakeReport({
+            objectAddress: 'Musterstraße 1, 80331 München',
+            contactEmail: 'ansprechpartner@musterfirma.de',
+            orderNumber: '4500123456'
+          })
+        })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).toContain('Musterstraße 1, 80331 München');
+      expect(xml).toContain('ansprechpartner@musterfirma.de');
+      expect(xml).toContain('4500123456');
+    });
+
+    it('befüllt Mehrungen und Festgestellte Mängel unabhängig von notes/performedWork', async () => {
+      const blob = await build(
+        fakeFullReport({
+          report: fakeReport({
+            additionalWorkNotes: 'Zusätzliche Dose erforderlich',
+            deficiencies: 'Schutzleiter nicht angeschlossen'
+          })
+        })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).toContain('Zusätzliche Dose erforderlich');
+      expect(xml).toContain('Schutzleiter nicht angeschlossen');
+    });
+
+    it('"Angebot benötigt für:" bleibt leer, solange quoteNeeded unbeantwortet ist (kein "Nein" ohne explizite Antwort)', async () => {
+      const blob = await build(
+        fakeFullReport({ report: fakeReport({ quoteNeeded: undefined, quoteNeededFor: undefined, followUpVisitNeeded: undefined }) })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).not.toContain('<w:t xml:space="preserve">Nein</w:t>');
+    });
+
+    it('"Angebot benötigt für:" trägt bei quoteNeeded=true den Freitext ein', async () => {
+      const blob = await build(
+        fakeFullReport({ report: fakeReport({ quoteNeeded: true, quoteNeededFor: 'Erweiterung Zählerschrank' }) })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).toContain('Erweiterung Zählerschrank');
+    });
+
+    it('"Angebot benötigt für:" trägt bei quoteNeeded=false "Nein" statt des Freitexts ein', async () => {
+      const blob = await build(
+        fakeFullReport({ report: fakeReport({ quoteNeeded: false, quoteNeededFor: 'sollte ignoriert werden' }) })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).not.toContain('sollte ignoriert werden');
+      const run = xml.match(/<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"\/><w:sz w:val="16"\/><w:szCs w:val="16"\/><\/w:rPr><w:t xml:space="preserve">Nein<\/w:t><\/w:r>/);
+      expect(run, 'erwartet einen "Nein"-Run im Angebot-Feld').toBeDefined();
+    });
+
+    it('befüllt Anlagenstatus/Auftrag exakt mit den Vorlagen-eigenen Dropdown-Werten', async () => {
+      const blob = await build(
+        fakeFullReport({ report: fakeReport({ plantStatus: 'bedingt Einsatzbereit', orderType: 'Reparatur & Inspektion' }) })
+      );
+      const xml = await documentXmlOf(blob);
+      expect(xml).toContain('bedingt Einsatzbereit');
+      expect(xml).toContain('Reparatur &amp; Inspektion');
+    });
+
+    it('schreibt Sicherheitseinrichtungen als "i.O."/"n.i.O." statt Ja/Nein', async () => {
+      const okBlob = await build(fakeFullReport({ report: fakeReport({ securityEquipmentOk: true }) }));
+      const okXml = await documentXmlOf(okBlob);
+      expect(okXml).toContain('i.O.');
+
+      const notOkBlob = await build(fakeFullReport({ report: fakeReport({ securityEquipmentOk: false }) }));
+      const notOkXml = await documentXmlOf(notOkBlob);
+      expect(notOkXml).toContain('n.i.O.');
+    });
+
+    it('befüllt Übernachtung(en) als freien Text', async () => {
+      const blob = await build(fakeFullReport({ report: fakeReport({ overnightStays: '2' }) }));
+      const xml = await documentXmlOf(blob);
+      expect(xml).toContain('<w:t xml:space="preserve">2</w:t>');
+    });
+
+    it('schreibt Folgeeinsatz als "Ja"/"Nein"', async () => {
+      const jaBlob = await build(fakeFullReport({ report: fakeReport({ followUpVisitNeeded: true }) }));
+      const jaXml = await documentXmlOf(jaBlob);
+      expect(jaXml).toContain('<w:t xml:space="preserve">Ja</w:t>');
+
+      const neinBlob = await build(fakeFullReport({ report: fakeReport({ followUpVisitNeeded: false }) }));
+      const neinXml = await documentXmlOf(neinBlob);
+      expect(neinXml).toContain('<w:t xml:space="preserve">Nein</w:t>');
+    });
+
+    it('funktioniert ohne jedes der neuen Felder (alle bleiben leer, kein Fehler)', async () => {
+      const blob = await build(fakeFullReport());
+      expect(blob.size).toBeGreaterThan(0);
+    });
   });
 
   it('begrenzt eingebettete Fotos auf die 10 Zeilen der Vorlage, ohne zu werfen', async () => {

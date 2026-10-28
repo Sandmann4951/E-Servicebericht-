@@ -7,6 +7,31 @@ export type ISODateTime = string; // vollständiger ISO-8601-Zeitstempel
 export type ReportStatus = 'open' | 'completed';
 
 /**
+ * Exakt die festen Auswahloptionen der "Anlagenstatus"-Dropdown-
+ * Inhaltssteuerung in der ELSA-Vorlage (ohne deren Platzhalter-Eintrag "-",
+ * der dort nur "nichts ausgewählt" bedeutet - das entspricht hier `undefined`).
+ */
+export type PlantStatus =
+  | 'Installation Einsatzbereit'
+  | 'Installation läuft noch'
+  | 'Probebetrieb'
+  | 'bedingt Einsatzbereit'
+  | 'nicht Einsatzbereit'
+  | 'Gesperrt';
+
+/** Exakt die festen Auswahloptionen der "Auftrag"-Dropdown-Inhaltssteuerung ("Art des Auftrags") in der ELSA-Vorlage. */
+export type OrderType =
+  | 'Installation'
+  | 'Reparatur'
+  | 'Reparatur & Inspektion'
+  | 'Inspektion'
+  | 'Inbetriebnahme'
+  | 'Schulung / Einweisung'
+  | 'Gewährleistung'
+  | 'Messtechnik'
+  | 'Prüfung';
+
+/**
  * Ein Servicebericht. `technicianName` ist bewusst ein freies Textfeld (kein
  * Fremdschlüssel) - Platzhalter für eine spätere Nutzerzuordnung, wenn mehrere
  * Monteure die App verwenden. Die *Count/-Duration-Felder sind denormalisiert,
@@ -44,6 +69,63 @@ export interface ServiceReport {
    * "was ist mir sonst noch aufgefallen"-Feld bestehen.
    */
   performedWork?: string;
+
+  /** Füllt das Vorlagenfeld "Objektadresse/Einsatzort:" (bisher ungenutzt). */
+  objectAddress?: string;
+  /** E-Mail des Ansprechpartners, analog zu `contactPhone` - füllt "E-Mail:" (bisher ungenutzt). */
+  contactEmail?: string;
+  /**
+   * Bestellnummer/Auftragsbestätigung des Kunden - rein manuelles Feld, füllt
+   * "Bestellnummer/AB:" (bisher ungenutzt). Der Serviceauftrag-PDF-Parser
+   * (siehe utils/serviceOrderImport.ts) erkennt im ELSA-PDF-Format keine
+   * Bestellnummer (geprüft - nur eine "Dok-nr." des Serviceauftrags-Dokuments
+   * selbst, bereits als Hinweiszeile in den Notizen übernommen, siehe
+   * import/importServiceOrder.ts), deshalb kein Auto-Vorschlag hierfür.
+   */
+  orderNumber?: string;
+  /** Füllt "Mehrungen:" (bisher ungenutzt) - zusätzlich zum Auftrag festgestellter Mehraufwand. */
+  additionalWorkNotes?: string;
+  /** Füllt "Festgestellte Mängel:" (bisher ungenutzt). */
+  deficiencies?: string;
+  /**
+   * Braucht der Kunde ein Angebot? `undefined` = noch nicht beantwortet
+   * (Vorlagenfeld bleibt leer, wie bei allen anderen optionalen Feldern).
+   * Siehe `quoteNeededFor` für das zugehörige "wofür"-Freitextfeld.
+   */
+  quoteNeeded?: boolean;
+  /**
+   * Wofür ein Angebot gebraucht wird - nur bei `quoteNeeded === true`
+   * eingebbar/relevant. Füllt zusammen mit `quoteNeeded` das Vorlagenfeld
+   * "Angebot benötigt für:" (bisher ungenutzt; bei `quoteNeeded === false`
+   * wird dort "Nein" eingetragen, bei `undefined` bleibt es leer - siehe
+   * docxExport.ts).
+   */
+  quoteNeededFor?: string;
+  /**
+   * Füllt die "Anlagenstatus"-Auswahl der Vorlage - exakt deren feste, in
+   * der Vorlage selbst vorgegebene Optionen (Dropdown-Inhaltssteuerung,
+   * bisher ungenutzt) statt einer eigens erfundenen Ja/Nein-Auswahl.
+   */
+  plantStatus?: PlantStatus;
+  /**
+   * Füllt die "Auftrag"-Auswahl der Vorlage ("Art des Auftrags") - exakt
+   * deren feste, vorgegebene Optionen (Dropdown-Inhaltssteuerung, bisher
+   * ungenutzt).
+   */
+  orderType?: OrderType;
+  /**
+   * Sicherheitseinrichtungen in Ordnung? Füllt "Sicherheitseinrichtungen:"
+   * (bisher ungenutzt) mit "i.O."/"n.i.O." - das sind die von der Vorlage
+   * selbst vorgegebenen Dropdown-Werte, keine eigene Ja/Nein-Beschriftung.
+   */
+  securityEquipmentOk?: boolean;
+  /** Füllt "Übernachtung(en):" (bisher ungenutzt) - freier Text statt Zahl, da auch "keine" o.ä. üblich ist. */
+  overnightStays?: string;
+  /**
+   * Muss ein Folgeeinsatz geplant werden? Füllt die "Folgeeinsatz"-Auswahl
+   * der Vorlage (bisher ungenutzt) mit "Ja"/"Nein".
+   */
+  followUpVisitNeeded?: boolean;
 
   /**
    * Geplante Mannstunden für diesen Einsatz (Summe über alle Rollen/

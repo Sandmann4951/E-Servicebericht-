@@ -60,6 +60,86 @@ describe('reports repository', () => {
     expect(updated?.notes).toBe('Allgemeine Notiz');
   });
 
+  it('speichert alle weiteren ELSA-Vorlagenfelder (Objektadresse, E-Mail, Bestellnummer, Mehrungen, Mängel, Angebot, Status-Auswahlen, Übernachtung, Folgeeinsatz) bereits beim Anlegen', async () => {
+    const report = await createReport({
+      projectNumber: '2026-003',
+      objectAddress: 'Musterstraße 1, 80331 München',
+      contactEmail: 'kontakt@musterfirma.de',
+      orderNumber: '4500123456',
+      additionalWorkNotes: 'Zusätzliche Dose erforderlich',
+      deficiencies: 'Schutzleiter nicht angeschlossen',
+      quoteNeeded: true,
+      quoteNeededFor: 'Erweiterung Zählerschrank',
+      plantStatus: 'bedingt Einsatzbereit',
+      orderType: 'Reparatur & Inspektion',
+      securityEquipmentOk: true,
+      overnightStays: '2',
+      followUpVisitNeeded: false
+    });
+
+    expect(report.objectAddress).toBe('Musterstraße 1, 80331 München');
+    expect(report.contactEmail).toBe('kontakt@musterfirma.de');
+    expect(report.orderNumber).toBe('4500123456');
+    expect(report.additionalWorkNotes).toBe('Zusätzliche Dose erforderlich');
+    expect(report.deficiencies).toBe('Schutzleiter nicht angeschlossen');
+    expect(report.quoteNeeded).toBe(true);
+    expect(report.quoteNeededFor).toBe('Erweiterung Zählerschrank');
+    expect(report.plantStatus).toBe('bedingt Einsatzbereit');
+    expect(report.orderType).toBe('Reparatur & Inspektion');
+    expect(report.securityEquipmentOk).toBe(true);
+    expect(report.overnightStays).toBe('2');
+    expect(report.followUpVisitNeeded).toBe(false);
+  });
+
+  it('lässt alle weiteren ELSA-Vorlagenfelder nachträglich per updateReport ändern, inkl. explizitem false für Ja/Nein-Felder', async () => {
+    const report = await createReport({ projectNumber: '2026-003b' });
+    expect(report.quoteNeeded).toBeUndefined();
+    expect(report.securityEquipmentOk).toBeUndefined();
+    expect(report.followUpVisitNeeded).toBeUndefined();
+
+    const updated = await updateReport(report.id, {
+      objectAddress: 'Teststraße 2',
+      contactEmail: 'neu@musterfirma.de',
+      orderNumber: '9988776655',
+      additionalWorkNotes: 'Mehr Material nötig',
+      deficiencies: 'Keine',
+      quoteNeeded: false,
+      plantStatus: 'nicht Einsatzbereit',
+      orderType: 'Inspektion',
+      securityEquipmentOk: false,
+      overnightStays: 'keine',
+      followUpVisitNeeded: true
+    });
+
+    expect(updated?.objectAddress).toBe('Teststraße 2');
+    expect(updated?.contactEmail).toBe('neu@musterfirma.de');
+    expect(updated?.orderNumber).toBe('9988776655');
+    expect(updated?.additionalWorkNotes).toBe('Mehr Material nötig');
+    expect(updated?.deficiencies).toBe('Keine');
+    expect(updated?.quoteNeeded).toBe(false);
+    expect(updated?.plantStatus).toBe('nicht Einsatzbereit');
+    expect(updated?.orderType).toBe('Inspektion');
+    expect(updated?.securityEquipmentOk).toBe(false);
+    expect(updated?.overnightStays).toBe('keine');
+    expect(updated?.followUpVisitNeeded).toBe(true);
+  });
+
+  it('lässt alle weiteren ELSA-Vorlagenfelder bei neuen/alten Berichten einfach ungesetzt (undefined), kein Pflichtfeld', async () => {
+    const report = await createReport({ projectNumber: '2026-003c' });
+    expect(report.objectAddress).toBeUndefined();
+    expect(report.contactEmail).toBeUndefined();
+    expect(report.orderNumber).toBeUndefined();
+    expect(report.additionalWorkNotes).toBeUndefined();
+    expect(report.deficiencies).toBeUndefined();
+    expect(report.quoteNeeded).toBeUndefined();
+    expect(report.quoteNeededFor).toBeUndefined();
+    expect(report.plantStatus).toBeUndefined();
+    expect(report.orderType).toBeUndefined();
+    expect(report.securityEquipmentOk).toBeUndefined();
+    expect(report.overnightStays).toBeUndefined();
+    expect(report.followUpVisitNeeded).toBeUndefined();
+  });
+
   it('speichert Telefonnummer des Ansprechpartners getrennt vom Namen (contactPhone) und lässt sie nachträglich ändern', async () => {
     const report = await createReport({
       projectNumber: '2026-002b',

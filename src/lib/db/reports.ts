@@ -1,5 +1,5 @@
 import { getDB } from './client';
-import type { ID, ReportStatus, ServiceReport } from './types';
+import type { ID, OrderType, PlantStatus, ReportStatus, ServiceReport } from './types';
 
 export interface CreateReportInput {
   projectNumber: string;
@@ -11,6 +11,18 @@ export interface CreateReportInput {
   notes?: string;
   performedWork?: string;
   plannedLaborHours?: number;
+  objectAddress?: string;
+  contactEmail?: string;
+  orderNumber?: string;
+  additionalWorkNotes?: string;
+  deficiencies?: string;
+  quoteNeeded?: boolean;
+  quoteNeededFor?: string;
+  plantStatus?: PlantStatus;
+  orderType?: OrderType;
+  securityEquipmentOk?: boolean;
+  overnightStays?: string;
+  followUpVisitNeeded?: boolean;
 }
 
 export async function createReport(input: CreateReportInput): Promise<ServiceReport> {
@@ -31,6 +43,18 @@ export async function createReport(input: CreateReportInput): Promise<ServiceRep
       input.plannedLaborHours !== undefined && Number.isFinite(input.plannedLaborHours) && input.plannedLaborHours > 0
         ? input.plannedLaborHours
         : undefined,
+    objectAddress: input.objectAddress?.trim() || undefined,
+    contactEmail: input.contactEmail?.trim() || undefined,
+    orderNumber: input.orderNumber?.trim() || undefined,
+    additionalWorkNotes: input.additionalWorkNotes?.trim() || undefined,
+    deficiencies: input.deficiencies?.trim() || undefined,
+    quoteNeeded: input.quoteNeeded,
+    quoteNeededFor: input.quoteNeededFor?.trim() || undefined,
+    plantStatus: input.plantStatus,
+    orderType: input.orderType,
+    securityEquipmentOk: input.securityEquipmentOk,
+    overnightStays: input.overnightStays?.trim() || undefined,
+    followUpVisitNeeded: input.followUpVisitNeeded,
     timeEntryCount: 0,
     totalDurationMinutes: 0,
     materialItemCount: 0,
@@ -120,6 +144,18 @@ export type UpdateReportPatch = Partial<
     | 'notes'
     | 'performedWork'
     | 'plannedLaborHours'
+    | 'objectAddress'
+    | 'contactEmail'
+    | 'orderNumber'
+    | 'additionalWorkNotes'
+    | 'deficiencies'
+    | 'quoteNeeded'
+    | 'quoteNeededFor'
+    | 'plantStatus'
+    | 'orderType'
+    | 'securityEquipmentOk'
+    | 'overnightStays'
+    | 'followUpVisitNeeded'
   >
 >;
 
@@ -138,6 +174,18 @@ export async function updateReport(id: ID, patch: UpdateReportPatch): Promise<Se
       report.plannedLaborHours =
         Number.isFinite(patch.plannedLaborHours) && patch.plannedLaborHours > 0 ? patch.plannedLaborHours : undefined;
     }
+    if (patch.objectAddress !== undefined) report.objectAddress = patch.objectAddress.trim() || undefined;
+    if (patch.contactEmail !== undefined) report.contactEmail = patch.contactEmail.trim() || undefined;
+    if (patch.orderNumber !== undefined) report.orderNumber = patch.orderNumber.trim() || undefined;
+    if (patch.additionalWorkNotes !== undefined) report.additionalWorkNotes = patch.additionalWorkNotes.trim() || undefined;
+    if (patch.deficiencies !== undefined) report.deficiencies = patch.deficiencies.trim() || undefined;
+    if (patch.quoteNeeded !== undefined) report.quoteNeeded = patch.quoteNeeded;
+    if (patch.quoteNeededFor !== undefined) report.quoteNeededFor = patch.quoteNeededFor.trim() || undefined;
+    if (patch.plantStatus !== undefined) report.plantStatus = patch.plantStatus;
+    if (patch.orderType !== undefined) report.orderType = patch.orderType;
+    if (patch.securityEquipmentOk !== undefined) report.securityEquipmentOk = patch.securityEquipmentOk;
+    if (patch.overnightStays !== undefined) report.overnightStays = patch.overnightStays.trim() || undefined;
+    if (patch.followUpVisitNeeded !== undefined) report.followUpVisitNeeded = patch.followUpVisitNeeded;
     report.updatedAt = new Date().toISOString();
   });
 }

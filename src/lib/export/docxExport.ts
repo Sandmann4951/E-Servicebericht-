@@ -108,19 +108,20 @@ import { buildTimesheetRows } from './timesheetRows';
  * DURCHGEFÜHRTE ARBEITEN: Eigenes `ServiceReport.performedWork`-Feld (in
  * der App eigenständig neben "Notizen"), füllt "Durchgeführte Arbeiten:".
  *
- * NOTIZEN → "INTERNER BERICHT" (VERSTECKTER TEXT, ABSICHTLICH SO
- * GEWÜNSCHT): Das allgemeine `notes`-Feld landet in der einzigen dafür
+ * NOTIZEN → "INTERNER BERICHT" (URSPRÜNGLICH VERSTECKTER TEXT, AUF
+ * NUTZERWUNSCH JETZT SICHTBAR): Das allgemeine `notes`-Feld landet in der
  * inhaltlich passenden Vorlagen-Stelle, "Interner Bericht/Bemerkungen/
- * Ersatzteilnummern:" - diese ist im Vorlagen-Quelltext als VERSTECKTER
- * Text angelegt (`w:vanish` auf Label UND Wertfeld, rot/fett/kursiv im
- * Quelltext), ein Eintrag dort ist im normal angezeigten/gedruckten
- * Dokument deshalb unsichtbar, bis jemand "Ausgeblendeten Text"/
- * Formatierungszeichen in Word einschaltet - genau das ist hier
- * ausdrücklich gewollt (passend zum Feldnamen "Interner Bericht": nicht
- * für die normale Kundenansicht gedacht). Die `rPr` des Zielruns (inkl.
- * `w:vanish`) wird dabei exakt unverändert übernommen - nur der
- * Textinhalt wird ausgetauscht, die Vorlagen-Formatierung/Sichtbarkeit
- * bleibt unangetastet.
+ * Ersatzteilnummern:". Diese war im Original-Vorlagen-Quelltext als
+ * VERSTECKTER Text angelegt (`w:vanish` auf Label UND Wertfeld, rot/fett/
+ * kursiv im Quelltext) - eine frühere, eigene Design-Entscheidung dieser
+ * Session, passend zum Feldnamen "Interner Bericht" interpretiert. Der
+ * Nutzer hat das per Rückfrage korrigiert: der eingetragene Notizen-Text
+ * soll normal sichtbar im Dokument erscheinen. `w:vanish` wurde deshalb aus
+ * ALLEN rPr-Blöcken entfernt, die zu diesem Feld gehören - sowohl beim
+ * Label-Run ("Interner Bericht/...") als auch bei jedem Run des Wertfelds
+ * (inkl. der Absatzmarken-rPr in `w:pPr`, die Word sonst weiter als
+ * "versteckter Absatz" behandeln würde) - alle übrigen Formatierungs-
+ * eigenschaften (Schriftart, Größe, Farbe, Fett/Kursiv) bleiben unverändert.
  *
  * ORT/DATUM (FUSSZEILE): Der Vorlagen-Tag für dieses Feld enthält den
  * festen ELSA-Firmenstandort ("Kirchheim bei München, ") bereits als
@@ -129,14 +130,28 @@ import { buildTimesheetRows } from './timesheetRows';
  * Zeitpunkt des Exports (nicht `report.createdAt`), mit `formatDateDE()`
  * formatiert.
  *
- * NICHT BEFÜLLTE FELDER: Mangels entsprechender Daten in Rivo bleiben
- * u.a. Bericht-Nr., Objektadresse/Einsatzort, E-Mail,
- * Bestellnummer/AB, Mehrungen, Festgestellte
- * Mängel, Angebot benötigt für, die
- * Statusfelder (Anlagenstatus, Auftrag, Sicherheitseinrichtungen,
- * Übernachtung(en), Hotelkosten, Folgeeinsatz) unangetastet leer -
- * ausdrücklicher Kundenwunsch ("trage lediglich die vorhandenen Daten in
- * die dafür vorgesehenen Spalten ein").
+ * WEITERE VORLAGENFELDER (Objektadresse/Einsatzort, E-Mail, Bestellnummer/
+ * AB, Mehrungen, Festgestellte Mängel, Angebot benötigt für, Anlagenstatus,
+ * Auftrag/Art des Auftrags, Sicherheitseinrichtungen, Übernachtung(en),
+ * Folgeeinsatz): waren bis zu dieser Erweiterung mangels Rivo-Daten leer
+ * gelassene, noch unangetastete Legacy-FORMTEXT- bzw. Dropdown-
+ * Inhaltssteuerungsfelder der Vorlage - jeweils per `ServiceReport`-Feld
+ * gleichen thematischen Namens befüllt (siehe db/types.ts). `plantStatus`/
+ * `orderType` nutzen bewusst EXAKT die von der Vorlage selbst vorgegebenen
+ * Dropdown-Optionen statt eigens erfundener Werte; `securityEquipmentOk`
+ * schreibt "i.O."/"n.i.O." (ebenfalls Vorlagen-eigene Werte statt "Ja"/
+ * "Nein"), `followUpVisitNeeded` schreibt "Ja"/"Nein". "Angebot benötigt
+ * für:" bekommt bei `quoteNeeded === true` den Freitext (`quoteNeededFor`),
+ * bei `false` den Text "Nein" (unterscheidbar von `undefined` = noch nicht
+ * beantwortet, bleibt leer). Der Serviceauftrag-PDF-Parser erkennt keine
+ * Bestellnummer im ELSA-PDF-Format (geprüft, siehe `orderNumber` in
+ * db/types.ts) - bleibt deshalb ein rein manuelles Feld. NICHT implementiert
+ * (bewusst nicht ohne Rückfrage erfunden): "Bericht-Nr." (keine
+ * entsprechenden Daten in Rivo), "Hotelkosten:" (direkt neben
+ * "Übernachtung(en):", bisher ebenfalls leer) und die separate "Kunde
+ * wünscht:"-Dropdown-Auswahl (Angebot/Kein Angebot/Rückruf, bisher
+ * ebenfalls leer, thematisch nah an "Angebot benötigt für:", aber ein
+ * eigenständiges Vorlagenfeld).
  */
 
 const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -190,7 +205,25 @@ function buildTemplateData(data: FullReport): Record<string, unknown> {
     // Vorlagen-Tags selbst ("Kirchheim bei München, {exportDate}"), hier
     // wird nur das Datum eingesetzt.
     exportDate: formatDateDE(todayISODate()),
-    materials: materialItems.map(materialRowData)
+    materials: materialItems.map(materialRowData),
+    objectAddress: report.objectAddress ?? '',
+    contactEmail: report.contactEmail ?? '',
+    orderNumber: report.orderNumber ?? '',
+    additionalWorkNotes: report.additionalWorkNotes ?? '',
+    deficiencies: report.deficiencies ?? '',
+    // `quoteNeeded === undefined` (noch nicht beantwortet) -> Feld bleibt
+    // leer, wie bei allen anderen optionalen Feldern. `false` -> "Nein"
+    // (statt leer, damit "beantwortet, aber kein Angebot nötig" von
+    // "noch nicht beantwortet" unterscheidbar bleibt). `true` -> der
+    // Freitext, wofür das Angebot gebraucht wird.
+    quoteNeededFor: report.quoteNeeded === undefined ? '' : report.quoteNeeded ? report.quoteNeededFor ?? '' : 'Nein',
+    plantStatus: report.plantStatus ?? '',
+    orderType: report.orderType ?? '',
+    // Exakt die Vorlagen-eigenen Dropdown-Werte "i.O."/"n.i.O." statt einer
+    // eigenen Ja/Nein-Beschriftung (siehe db/types.ts securityEquipmentOk).
+    securityEquipmentOk: report.securityEquipmentOk === undefined ? '' : report.securityEquipmentOk ? 'i.O.' : 'n.i.O.',
+    overnightStays: report.overnightStays ?? '',
+    followUpVisitNeeded: report.followUpVisitNeeded === undefined ? '' : report.followUpVisitNeeded ? 'Ja' : 'Nein'
   };
   // Zeiten-Tabelle: eine Zeile pro Tag (`{#timeRows}`-Loop) + "Gesamt"-Zeile
   // (`{total...}`-Tags) - alle Werte fertig berechnet, siehe timesheetRows.ts.

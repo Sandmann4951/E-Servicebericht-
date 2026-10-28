@@ -12,7 +12,7 @@
   } from '../lib/db/reports';
   import { getActiveTimeEntry } from '../lib/db/timeEntries';
   import { switchToIdle } from '../lib/clockActions';
-  import type { ReportStatus, ServiceReport } from '../lib/db/types';
+  import type { OrderType, PlantStatus, ReportStatus, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
   import { formatDateTimeDE, formatDurationMinutes } from '../lib/utils/date';
@@ -25,6 +25,30 @@
   import SignatureSection from '../lib/components/SignatureSection.svelte';
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import Icon from '../lib/components/Icon.svelte';
+
+  // Exakt die festen Auswahloptionen der jeweiligen Dropdown-Inhaltssteuerung
+  // in der ELSA-Vorlage (siehe db/types.ts PlantStatus/OrderType) - keine
+  // eigens erfundenen Werte, damit der Export immer zu den von Word
+  // vorgegebenen Optionen passt.
+  const PLANT_STATUS_OPTIONS: PlantStatus[] = [
+    'Installation Einsatzbereit',
+    'Installation läuft noch',
+    'Probebetrieb',
+    'bedingt Einsatzbereit',
+    'nicht Einsatzbereit',
+    'Gesperrt'
+  ];
+  const ORDER_TYPE_OPTIONS: OrderType[] = [
+    'Installation',
+    'Reparatur',
+    'Reparatur & Inspektion',
+    'Inspektion',
+    'Inbetriebnahme',
+    'Schulung / Einweisung',
+    'Gewährleistung',
+    'Messtechnik',
+    'Prüfung'
+  ];
 
   let { id }: { id: string } = $props();
 
@@ -53,6 +77,23 @@
   // Zahl - sonst müsste jede Zwischeneingabe beim Tippen (z.B. "1" vor dem
   // ",5" von "1,5") schon eine gültige Zahl sein.
   let plannedLaborHours = $state('');
+
+  let objectAddress = $state('');
+  let contactEmail = $state('');
+  let orderNumber = $state('');
+  let additionalWorkNotes = $state('');
+  let deficiencies = $state('');
+  // Tri-state wie bei den übrigen Ja/Nein-Feldern unten: `undefined` =
+  // "noch nicht beantwortet" (Vorlagenfeld bleibt leer), danach per Toggle
+  // immer `true`/`false` - kein UI-Weg zurück zu `undefined`, gleiches
+  // Prinzip wie beim Lager/Bestellung-Toggle bei Material.
+  let quoteNeeded = $state<boolean | undefined>(undefined);
+  let quoteNeededFor = $state('');
+  let plantStatus = $state<PlantStatus | undefined>(undefined);
+  let orderType = $state<OrderType | undefined>(undefined);
+  let securityEquipmentOk = $state<boolean | undefined>(undefined);
+  let overnightStays = $state('');
+  let followUpVisitNeeded = $state<boolean | undefined>(undefined);
 
   let timeEntryCount = $state(0);
   let totalDurationMinutes = $state(0);
@@ -177,7 +218,19 @@
         technicianName: technicianName || undefined,
         notes: notes || undefined,
         performedWork: performedWork || undefined,
-        plannedLaborHours: parsePlannedLaborHours()
+        plannedLaborHours: parsePlannedLaborHours(),
+        objectAddress: objectAddress || undefined,
+        contactEmail: contactEmail || undefined,
+        orderNumber: orderNumber || undefined,
+        additionalWorkNotes: additionalWorkNotes || undefined,
+        deficiencies: deficiencies || undefined,
+        quoteNeeded,
+        quoteNeededFor: quoteNeededFor || undefined,
+        plantStatus,
+        orderType,
+        securityEquipmentOk,
+        overnightStays: overnightStays || undefined,
+        followUpVisitNeeded
       });
       reportId = created.id;
       // Absichtlich noch KEIN navigate() hier: das würde über
@@ -202,7 +255,19 @@
       notes: notes || undefined,
       performedWork: performedWork || undefined,
       status,
-      plannedLaborHours: parsePlannedLaborHours()
+      plannedLaborHours: parsePlannedLaborHours(),
+      objectAddress: objectAddress || undefined,
+      contactEmail: contactEmail || undefined,
+      orderNumber: orderNumber || undefined,
+      additionalWorkNotes: additionalWorkNotes || undefined,
+      deficiencies: deficiencies || undefined,
+      quoteNeeded,
+      quoteNeededFor: quoteNeededFor || undefined,
+      plantStatus,
+      orderType,
+      securityEquipmentOk,
+      overnightStays: overnightStays || undefined,
+      followUpVisitNeeded
     });
     if (updated) flashSaved();
   }
@@ -340,6 +405,18 @@
       performedWork = report.performedWork ?? '';
       status = report.status;
       plannedLaborHours = report.plannedLaborHours !== undefined ? String(report.plannedLaborHours) : '';
+      objectAddress = report.objectAddress ?? '';
+      contactEmail = report.contactEmail ?? '';
+      orderNumber = report.orderNumber ?? '';
+      additionalWorkNotes = report.additionalWorkNotes ?? '';
+      deficiencies = report.deficiencies ?? '';
+      quoteNeeded = report.quoteNeeded;
+      quoteNeededFor = report.quoteNeededFor ?? '';
+      plantStatus = report.plantStatus;
+      orderType = report.orderType;
+      securityEquipmentOk = report.securityEquipmentOk;
+      overnightStays = report.overnightStays ?? '';
+      followUpVisitNeeded = report.followUpVisitNeeded;
       timeEntryCount = report.timeEntryCount;
       totalDurationMinutes = report.totalDurationMinutes;
       materialItemCount = report.materialItemCount;
@@ -474,6 +551,27 @@
     // oninput={onFieldChange} aus, es gäbe also nichts "Pending" zum
     // Flushen - queueSave() direkt aufzurufen ist hier der korrekte Weg,
     // sonst wird die Änderung nie gespeichert (siehe Regressionstest).
+    await queueSave();
+  }
+
+  // Dieselbe Direkt-Speichern-Logik wie toggleStatus() oben - alle Ja/Nein-
+  // Auswahlen unten sind Buttons statt Inputs, lösen also kein
+  // oninput={onFieldChange} aus.
+  async function toggleQuoteNeeded(value: boolean): Promise<void> {
+    if (locked) return;
+    quoteNeeded = value;
+    await queueSave();
+  }
+
+  async function toggleSecurityEquipmentOk(value: boolean): Promise<void> {
+    if (locked) return;
+    securityEquipmentOk = value;
+    await queueSave();
+  }
+
+  async function toggleFollowUpVisitNeeded(value: boolean): Promise<void> {
+    if (locked) return;
+    followUpVisitNeeded = value;
     await queueSave();
   }
 
@@ -709,6 +807,18 @@
         </label>
 
         <label>
+          Objektadresse/Einsatzort (optional)
+          <input
+            type="text"
+            bind:value={objectAddress}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="Straße, PLZ Ort"
+            disabled={locked}
+          />
+        </label>
+
+        <label>
           Ansprechpartner (Kunde)
           <input
             type="text"
@@ -733,6 +843,18 @@
         </label>
 
         <label>
+          E-Mail (Ansprechpartner, optional)
+          <input
+            type="email"
+            bind:value={contactEmail}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="z.B. name@firma.de"
+            disabled={locked}
+          />
+        </label>
+
+        <label>
           Techniker
           <input
             type="text"
@@ -740,6 +862,18 @@
             oninput={onTechnicianNameInput}
             onblur={flushNow}
             placeholder="Dein Name"
+            disabled={locked}
+          />
+        </label>
+
+        <label>
+          Bestellnummer/AB (optional)
+          <input
+            type="text"
+            bind:value={orderNumber}
+            oninput={onFieldChange}
+            onblur={flushNow}
+            placeholder="z.B. 4500123456"
             disabled={locked}
           />
         </label>
@@ -857,6 +991,133 @@
                 disabled={locked}
               ></textarea>
             </label>
+
+            <h3 class="section-heading">Weitere Vorlagenfelder</h3>
+
+            <label>
+              Mehrungen (optional)
+              <textarea
+                rows="3"
+                bind:value={additionalWorkNotes}
+                oninput={onFieldChange}
+                onblur={flushNow}
+                placeholder="Zusätzlich zum Auftrag festgestellter Mehraufwand…"
+                disabled={locked}
+              ></textarea>
+            </label>
+
+            <label>
+              Festgestellte Mängel (optional)
+              <textarea
+                rows="3"
+                bind:value={deficiencies}
+                oninput={onFieldChange}
+                onblur={flushNow}
+                placeholder="Beim Einsatz festgestellte Mängel…"
+                disabled={locked}
+              ></textarea>
+            </label>
+
+            <div class="toggle-field">
+              <span class="toggle-label">Braucht der Kunde ein Angebot?</span>
+              <div class="toggle-group">
+                <button type="button" class:active={quoteNeeded === true} disabled={locked} onclick={() => toggleQuoteNeeded(true)}>
+                  Ja
+                </button>
+                <button type="button" class:active={quoteNeeded === false} disabled={locked} onclick={() => toggleQuoteNeeded(false)}>
+                  Nein
+                </button>
+              </div>
+            </div>
+            {#if quoteNeeded}
+              <label>
+                Angebot benötigt für
+                <input
+                  type="text"
+                  bind:value={quoteNeededFor}
+                  oninput={onFieldChange}
+                  onblur={flushNow}
+                  placeholder="z.B. Erweiterung Zählerschrank"
+                  disabled={locked}
+                />
+              </label>
+            {/if}
+
+            <label>
+              Anlagenstatus (optional)
+              <select bind:value={plantStatus} onchange={() => queueSave()} disabled={locked}>
+                <option value={undefined}></option>
+                {#each PLANT_STATUS_OPTIONS as option (option)}
+                  <option value={option}>{option}</option>
+                {/each}
+              </select>
+            </label>
+
+            <label>
+              Art des Auftrags (optional)
+              <select bind:value={orderType} onchange={() => queueSave()} disabled={locked}>
+                <option value={undefined}></option>
+                {#each ORDER_TYPE_OPTIONS as option (option)}
+                  <option value={option}>{option}</option>
+                {/each}
+              </select>
+            </label>
+
+            <div class="toggle-field">
+              <span class="toggle-label">Sicherheitseinrichtungen i.O.?</span>
+              <div class="toggle-group">
+                <button
+                  type="button"
+                  class:active={securityEquipmentOk === true}
+                  disabled={locked}
+                  onclick={() => toggleSecurityEquipmentOk(true)}
+                >
+                  i.O.
+                </button>
+                <button
+                  type="button"
+                  class:active={securityEquipmentOk === false}
+                  disabled={locked}
+                  onclick={() => toggleSecurityEquipmentOk(false)}
+                >
+                  n.i.O.
+                </button>
+              </div>
+            </div>
+
+            <label>
+              Übernachtung(en) (optional)
+              <input
+                type="text"
+                bind:value={overnightStays}
+                oninput={onFieldChange}
+                onblur={flushNow}
+                placeholder="z.B. 2 oder keine"
+                disabled={locked}
+              />
+            </label>
+
+            <div class="toggle-field">
+              <span class="toggle-label">Muss ein Folgeeinsatz geplant werden?</span>
+              <div class="toggle-group">
+                <button
+                  type="button"
+                  class:active={followUpVisitNeeded === true}
+                  disabled={locked}
+                  onclick={() => toggleFollowUpVisitNeeded(true)}
+                >
+                  Ja
+                </button>
+                <button
+                  type="button"
+                  class:active={followUpVisitNeeded === false}
+                  disabled={locked}
+                  onclick={() => toggleFollowUpVisitNeeded(false)}
+                >
+                  Nein
+                </button>
+              </div>
+            </div>
           </div>
         {:else if activeTab === 'zeiten' && reportId}
           <TimeEntrySection {reportId} {locked} onChanged={refreshSummary} />
@@ -1321,6 +1582,48 @@
     gap: var(--space-1);
     font-size: 0.85rem;
     color: var(--color-text-muted);
+  }
+
+  .section-heading {
+    margin: var(--space-2) 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-text);
+    border-top: 1px solid var(--color-border);
+    padding-top: var(--space-4);
+  }
+
+  .toggle-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .toggle-label {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+
+  .toggle-group {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .toggle-group button {
+    flex: 1;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    min-height: auto;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .toggle-group button.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-contrast);
   }
 
   .primary {
