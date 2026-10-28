@@ -7,6 +7,7 @@
     autoCheckOutIfExceeded,
     checkInDay,
     checkOutDay,
+    isReturnTravel,
     switchToProject,
     startProjectByNumber,
     type AutoCheckOutResult,
@@ -23,6 +24,8 @@
 
   let workDay = $state<WorkDay | undefined>(undefined);
   let activeEntry = $state<TimeEntry | undefined>(undefined);
+  /** Nur bei laufender Fahrtzeit relevant - für den Badge-Text ("Fahrtzeit zu"/"Rückfahrt von"), siehe isReturnTravel() (clockActions.ts). */
+  let activeEntryIsReturnTravel = $state(false);
   let activeReport = $state<ServiceReport | undefined>(undefined);
   let loading = $state(true);
   let busy = $state(false);
@@ -87,9 +90,11 @@
     if (workDay) {
       activeEntry = await getGloballyActiveTimeEntry();
       activeReport = activeEntry?.reportId ? await getReport(activeEntry.reportId) : undefined;
+      activeEntryIsReturnTravel = activeEntry?.isTravel && activeEntry.reportId ? await isReturnTravel(activeEntry) : false;
     } else {
       activeEntry = undefined;
       activeReport = undefined;
+      activeEntryIsReturnTravel = false;
     }
     await loadTodaySummary();
     loading = false;
@@ -351,7 +356,11 @@
       >
         <span class="dot"></span>
         <span>
-          Eingecheckt in „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
+          {#if activeEntry?.isTravel}
+            {activeEntryIsReturnTravel ? 'Rückfahrt von' : 'Fahrtzeit zu'} „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
+          {:else}
+            Eingecheckt in „{activeReport.projectNumber}“ seit {activeEntry?.startTime}
+          {/if}
           {#if elapsedMinutes !== undefined}· {formatDurationMinutes(elapsedMinutes)}{/if}
         </span>
       </button>
