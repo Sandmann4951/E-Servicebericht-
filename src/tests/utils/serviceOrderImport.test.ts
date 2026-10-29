@@ -128,4 +128,24 @@ describe('parseServiceOrderText', () => {
     const result = parseServiceOrderText(`  ${SAMPLE_RAW}  `);
     expect(result.raw).toBe(SAMPLE_RAW);
   });
+
+  // Reale, bildlastigere Export-Variante des Serviceauftrags (Beispiel
+  // "Klenzestraße"): ein Großteil des dynamischen Inhalts (Kundendaten,
+  // Ansprechpartner, Artikeltabelle UND die sonst genutzte volle
+  // "Projektnummer: X"-Zeile) liegt dort als rasterisiertes Bild statt
+  // echtem Text vor - pdfjs' Textextraktion liefert dafür nichts. Nur die
+  // statische Kopf-Info-Box bleibt echter Text, mit der ABGEKÜRZTEN Form
+  // "Projektnr.:" statt "Projektnummer:".
+  const SAMPLE_RAW_IMAGE_HEAVY = ['Dok-nr.: 266051', 'Datum: 21.09.2026', 'Kundennr.: 60103', 'Projektnr.: 266139', '85748 Garching', 'Serviceauftrag', 'Klenzestraße 34, UG1 (Stellplatz P_52)', 'Pos.MengeEin.Text'].join('\n');
+
+  it('erkennt die Projektnummer über die abgekürzte Form "Projektnr.:" (Fallback), wenn die volle "Projektnummer:"-Zeile fehlt (bildlastigere Export-Variante)', () => {
+    const result = parseServiceOrderText(SAMPLE_RAW_IMAGE_HEAVY);
+    expect(result.projectNumber).toBe('266139');
+  });
+
+  it('bevorzugt bei Vorhandensein beider Formen die volle Schreibweise "Projektnummer:"', () => {
+    const raw = ['Projektnr.: 999999', 'Projektnummer: 264235'].join('\n');
+    const result = parseServiceOrderText(raw);
+    expect(result.projectNumber).toBe('264235');
+  });
 });
