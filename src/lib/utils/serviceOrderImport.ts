@@ -132,7 +132,15 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const projectNumber = findValue(lines, /Projektnummer:\s*(\S+)/);
+  // Bevorzugt die volle Schreibweise "Projektnummer:" (in der Praxis seltener
+  // von Formatierungs-/Verschmelzungs-Problemen betroffen als die Info-Box
+  // oben rechts) - als Fallback zusätzlich die abgekürzte Form "Projektnr.:"
+  // aus der Kopf-Info-Box. Relevant z.B. bei einer bildlastigeren Export-
+  // Variante des Serviceauftrags, bei der ein Großteil des dynamischen
+  // Inhalts (inkl. der vollen "Projektnummer:"-Zeile) als rasterisiertes
+  // Bild statt echtem Text vorliegt - dort bleibt nur die Info-Box
+  // ("Projektnr.: 266139") als echter, auslesbarer Text übrig.
+  const projectNumber = findValue(lines, /Projektnummer:\s*(\S+)/) ?? findValue(lines, /Projektnr\.?:?\s*(\S+)/);
   const documentNumber = findValue(lines, /Dok-nr\.\s*:\s*(\S+)/);
   const projectDescription = findValue(lines, /Auftrag:\s*(.+)/);
   const contactPerson = findValue(lines, /Ansprechpartner vor Ort:\s*(.+)/);
