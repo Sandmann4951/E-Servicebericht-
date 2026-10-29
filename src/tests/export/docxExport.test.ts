@@ -445,11 +445,13 @@ describe('buildReportDocx', () => {
     expect(xml.match(/r:embed="rId22"/g)).toBeNull();
   });
 
-  it('traegt bei einer Kunden-Unterschrift nur den gedruckten Namen ein (kein Unterschriftsbild, da die Vorlage dafuer keinen Platz vorsieht)', async () => {
+  it('traegt bei einer Kunden-Unterschrift den gedruckten Namen UND das tatsaechliche Unterschriftsbild ein (neue DrawingML-Einfuegung, da die Vorlage dafuer urspruenglich keinen Platzhalter vorsieht)', async () => {
     const blob = await build(
       fakeFullReport({
         report: fakeReport({
           signatureBlob: new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' }),
+          signatureWidth: 400,
+          signatureHeight: 100,
           signedByName: 'Herr Kunde Unterschrift',
           signedAt: '2026-08-11T12:00:00.000Z'
         })
@@ -457,11 +459,38 @@ describe('buildReportDocx', () => {
     );
     const xml = await documentXmlOf(blob);
     expect(xml).toContain('Herr Kunde Unterschrift');
+
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const signatureMedia = Object.keys(zip.files).filter((name) => name.startsWith('word/media/signature'));
+    expect(signatureMedia).toHaveLength(1);
+
+    const relsXml = await zip.file('word/_rels/document.xml.rels')!.async('text');
+    expect(relsXml).toContain('rIdSignature');
+    expect(xml).toContain('r:embed="rIdSignature"');
+
+    // Das Bild sitzt in der "Kunde:"-Zelle, VOR der gedruckten Namenszeile
+    // (Reihenfolge im Dokument: erst das Drawing, dann "Kunde Unterschrift").
+    const drawingIdx = xml.indexOf('r:embed="rIdSignature"');
+    const nameIdx = xml.indexOf('Herr Kunde Unterschrift');
+    expect(drawingIdx).toBeGreaterThan(-1);
+    expect(drawingIdx).toBeLessThan(nameIdx);
+
+    // Seitenverhältnis bleibt erhalten (400x100 = 4:1), innerhalb der Box skaliert.
+    const extentMatch = xml.slice(Math.max(0, drawingIdx - 700), drawingIdx).match(/<wp:extent cx="(\d+)" cy="(\d+)"\/>/);
+    expect(extentMatch, 'erwartet <wp:extent> vor dem Signatur-Drawing').toBeTruthy();
+    const cx = Number(extentMatch![1]);
+    const cy = Number(extentMatch![2]);
+    expect(cx / cy).toBeCloseTo(4, 1);
+    // Nicht überdimensioniert - deutlich kleiner als die Fotobox.
+    expect(cx).toBeLessThan(1524000);
   });
 
-  it('funktioniert ohne Unterschrift (leeres Namensfeld, kein Fehler)', async () => {
+  it('funktioniert ohne Unterschrift (leeres Namensfeld, kein Bild, kein Fehler)', async () => {
     const blob = await build(fakeFullReport({ report: fakeReport({ signatureBlob: undefined, signedByName: undefined }) }));
     expect(blob.size).toBeGreaterThan(0);
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const signatureMedia = Object.keys(zip.files).filter((name) => name.startsWith('word/media/signature'));
+    expect(signatureMedia).toHaveLength(0);
   });
 
   describe('Schriftformatierung der eingetragenen Werte (Regressionstest für den doppelt verschachtelten <w:rPr>-Bug)', () => {

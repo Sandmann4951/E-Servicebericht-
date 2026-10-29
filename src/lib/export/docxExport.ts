@@ -98,12 +98,25 @@ import { buildTimesheetRows } from './timesheetRows';
  * (siehe timesheetRows.ts), es gibt also keine Formeln mehr, die erst in
  * Excel neu berechnet werden müssten, und keine Obergrenze an Zeilen.
  *
- * UNTERSCHRIFT: Die Vorlage sieht für die Kunden-Unterschrift nur eine
- * Zeile für den gedruckten Namen vor ("Namen in Druckschrift (Für
- * Unterschrift)"), keinen Platz für ein Bild - deshalb wird hier bewusst
- * NUR `signedByName` eingetragen, die tatsächliche Unterschrift-Grafik
- * vom Unterschriften-Pad erscheint in diesem Export nicht (ausdrücklich
- * so vom Kunden bestätigt, um das Vorlagen-Layout nicht zu verändern).
+ * UNTERSCHRIFT (BILD): `signedByName` füllt wie bisher die gedruckte
+ * Namenszeile ("Namen in Druckschrift (Für Unterschrift)"). Zusätzlich
+ * wird jetzt (auf Nutzerwunsch, frühere Design-Entscheidung dieser Session
+ * bewusst korrigiert) `report.signatureBlob` als echtes Bild in die
+ * "Kunde:"-Spalte direkt über dieser Namenszeile eingefügt - siehe
+ * `injectSignature()` unten. ANDERS als bei den 10 Foto-Dokumentations-
+ * Zeilen (injectPhotos()) gibt es in der Original-Vorlage dafür KEINEN
+ * vorbereiteten Bild-Platzhalter zum Austauschen (die Vorlage war
+ * ursprünglich nur für eine Unterschrift auf dem AUSGEDRUCKTEN Papier
+ * gedacht) - `injectSignature()` erzeugt deshalb eine komplett NEUE
+ * DrawingML-Bild-Einfügung (eigene Relationship + Mediendatei + ein neuer
+ * `<w:p>` mit `<w:drawing>`) statt nur einen bestehenden Platzhalter
+ * auszutauschen. Das erweitert die Vorlage an dieser einen Stelle
+ * geringfügig (ein zusätzlicher Absatz) - vom Nutzer für diesen Zweck
+ * ausdrücklich akzeptiert, anders als bei den reinen Text-Feldern, deren
+ * Formatierung 1:1 erhalten bleiben muss. Ankerpunkt für die Einfügestelle
+ * ist der statische Text "Kunde:" (immer vorhanden, unabhängig davon ob
+ * bereits unterschrieben wurde) - robuster als ein Anker auf den
+ * (möglicherweise leeren) Namenstext selbst.
  *
  * DURCHGEFÜHRTE ARBEITEN: Eigenes `ServiceReport.performedWork`-Feld (in
  * der App eigenständig neben "Notizen"), füllt "Durchgeführte Arbeiten:".
@@ -165,6 +178,21 @@ const EMU_PER_PX = 9525;
 
 /** Relationship-ID des in der Vorlage 10-fach wiederverwendeten Platzhalterbilds (siehe Dateikommentar oben). */
 const PLACEHOLDER_REL_ID = 'rId22';
+
+/**
+ * Obergrenze für das neu eingefügte Unterschrift-Bild (siehe injectSignature()
+ * unten) - deutlich kleiner als PHOTO_BOX_MAX_PX, da hier nur die schmale
+ * "Kunde:"-Tabellenzelle der Unterschriftenzeile zur Verfügung steht
+ * (Zellbreite laut Vorlage ca. 2603 Twips ≈ 180px bei 96dpi, abzüglich
+ * Zellrand). BEIDE Dimensionen sind eine eigene, unabhängige Obergrenze
+ * (anders als bei fitPhotoBox(), wo nur die längere Seite zählt) - eine
+ * Unterschrift ist typischerweise sehr breit und flach, nicht näherungsweise
+ * quadratisch wie ein Foto.
+ */
+const SIGNATURE_BOX_MAX_WIDTH_PX = 140;
+const SIGNATURE_BOX_MAX_HEIGHT_PX = 45;
+/** Eigene Relationship-ID für das neu eingefügte Unterschrift-Bild. */
+const SIGNATURE_REL_ID = 'rIdSignature';
 
 /** "L"/"B" - exakt die Buchstaben, die die Vorlage selbst als Spaltenbezeichnung ("Lager (L) / Bestellung (B)") nutzt; leer wenn nicht gesetzt. */
 function materialSourceLetter(item: MaterialItem): string {
@@ -327,6 +355,82 @@ async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
   zip.file('[Content_Types].xml', contentTypesXml);
 }
 
+/** Passt eine Unterschrift proportional in SIGNATURE_BOX_MAX_WIDTH_PX/HEIGHT_PX ein (siehe dort) - ohne bekannte Originalgröße (sollte nicht vorkommen, defensiv) die volle Box. */
+function fitSignatureBox(width: number | undefined, height: number | undefined): { widthPx: number; heightPx: number } {
+  if (!width || !height) return { widthPx: SIGNATURE_BOX_MAX_WIDTH_PX, heightPx: SIGNATURE_BOX_MAX_HEIGHT_PX };
+  const scale = Math.min(SIGNATURE_BOX_MAX_WIDTH_PX / width, SIGNATURE_BOX_MAX_HEIGHT_PX / height, 1);
+  return { widthPx: Math.round(width * scale), heightPx: Math.round(height * scale) };
+}
+
+/**
+ * Fügt (falls vorhanden) `report.signatureBlob` als neues Bild direkt über
+ * der gedruckten Namenszeile in der "Kunde:"-Spalte der Unterschriftenzeile
+ * ein - siehe Dateikommentar oben ("UNTERSCHRIFT (BILD)"). Mutiert `zip`
+ * direkt, analog zu injectPhotos() oben, aber als komplett NEUE DrawingML-
+ * Einfügung statt Austausch eines vorhandenen Platzhalters (den es hier
+ * nicht gibt).
+ *
+ * Ankerpunkt ist der statische Text "Kunde:" (immer vorhanden) - von dort
+ * aus wird die nächste Zelle (`</w:tc>` danach, dann `</w:tcPr>` der
+ * folgenden Zelle) gesucht: das ist die Namens-Werte-Zelle, in die der neue
+ * Bild-Absatz als ERSTER Absatz eingefügt wird, direkt nach deren `tcPr`.
+ */
+async function injectSignature(zip: PizZip, report: ServiceReport): Promise<void> {
+  if (!report.signatureBlob) return;
+
+  const documentFile = zip.file('word/document.xml');
+  const relsFile = zip.file('word/_rels/document.xml.rels');
+  const contentTypesFile = zip.file('[Content_Types].xml');
+  if (!documentFile || !relsFile || !contentTypesFile) return; // sollte bei dieser Vorlage nie vorkommen, rein defensiv
+
+  let documentXml = documentFile.asText();
+  let relsXml = relsFile.asText();
+  let contentTypesXml = contentTypesFile.asText();
+
+  const labelIdx = documentXml.indexOf('<w:t>Kunde:</w:t>');
+  if (labelIdx === -1) return; // sollte bei dieser Vorlage nie vorkommen, rein defensiv
+  const labelCellEnd = documentXml.indexOf('</w:tc>', labelIdx);
+  if (labelCellEnd === -1) return;
+  const valueCellTcPrEnd = documentXml.indexOf('</w:tcPr>', labelCellEnd);
+  if (valueCellTcPrEnd === -1) return;
+  const insertAt = valueCellTcPrEnd + '</w:tcPr>'.length;
+
+  const mimeType = report.signatureBlob.type || 'image/png';
+  const extension = extensionForMimeType(mimeType);
+  const mediaName = `signature.${extension}`;
+  const bytes = new Uint8Array(await report.signatureBlob.arrayBuffer());
+  zip.file(`word/media/${mediaName}`, bytes, { binary: true });
+
+  relsXml = relsXml.replace(
+    '</Relationships>',
+    `<Relationship Id="${SIGNATURE_REL_ID}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/></Relationships>`
+  );
+  contentTypesXml = ensureContentType(contentTypesXml, extension, mimeType);
+
+  const { widthPx, heightPx } = fitSignatureBox(report.signatureWidth, report.signatureHeight);
+  const cx = widthPx * EMU_PER_PX;
+  const cy = heightPx * EMU_PER_PX;
+
+  const drawingParagraph =
+    `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:docPr id="900001" name="Unterschrift"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:nvPicPr><pic:cNvPr id="0" name="Unterschrift"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${SIGNATURE_REL_ID}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+
+  documentXml = documentXml.slice(0, insertAt) + drawingParagraph + documentXml.slice(insertAt);
+
+  zip.file('word/document.xml', documentXml);
+  zip.file('word/_rels/document.xml.rels', relsXml);
+  zip.file('[Content_Types].xml', contentTypesXml);
+}
+
 /**
  * Baut den Servicebericht als Word-Dokument aus der offiziellen ELSA-Vorlage.
  * Rein clientseitig, keine DB-/DOM-Zugriffe.
@@ -346,6 +450,7 @@ export async function buildReportDocx(data: FullReport, templateBytes?: ArrayBuf
 
   const outZip = doc.getZip();
   await injectPhotos(outZip, data.photos.slice(0, MAX_PHOTOS));
+  await injectSignature(outZip, data.report);
 
   return outZip.generate({ type: 'blob', mimeType: DOCX_MIME_TYPE });
 }

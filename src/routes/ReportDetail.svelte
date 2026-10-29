@@ -17,6 +17,7 @@
   import { debounce } from '../lib/utils/debounce';
   import { formatDateTimeDE, formatDurationMinutes } from '../lib/utils/date';
   import { splitContactPersonAndPhone } from '../lib/utils/contactPerson';
+  import { missingRequiredFieldsForFinalize } from '../lib/utils/reportFinalization';
   import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
@@ -490,8 +491,26 @@
     await refreshSummary();
   }
 
+  /**
+   * Blockiert den Abschluss-Vorgang, falls Pflichtfelder fehlen (siehe
+   * utils/reportFinalization.ts) - springt dabei in den Übersicht-Tab (wo
+   * die Felder liegen), damit der Monteur sie direkt nachtragen kann, statt
+   * raten zu müssen, wo er suchen soll.
+   * @returns true, wenn blockiert wurde (Aufrufer muss dann abbrechen).
+   */
+  function blockFinalizeIfFieldsMissing(): boolean {
+    const missing = missingRequiredFieldsForFinalize({ plantStatus, securityEquipmentOk, followUpVisitNeeded });
+    if (missing.length === 0) return false;
+    activeTab = 'übersicht';
+    alert(
+      `Bericht kann noch nicht abgeschlossen werden. Bitte zuerst folgende Pflichtfelder in der Übersicht ausfüllen:\n\n${missing.map((field) => `• ${field}`).join('\n')}`
+    );
+    return true;
+  }
+
   async function saveSignature(blob: Blob, name: string, width: number, height: number): Promise<void> {
     if (!reportId) return;
+    if (blockFinalizeIfFieldsMissing()) return;
     const updated = await setReportSignature(reportId, { blob, signedByName: name, width, height });
     if (!updated) return;
     signatureBlob = updated.signatureBlob;
@@ -510,6 +529,7 @@
   /** Schließt den Bericht final ab, ohne Kunden-Unterschrift - z.B. wenn keine Unterschrift nötig oder möglich ist. */
   async function finalizeWithoutSignature(): Promise<void> {
     if (!reportId || locked) return;
+    if (blockFinalizeIfFieldsMissing()) return;
     if (
       !confirm(
         'Bericht ohne Kunden-Unterschrift final abschließen? Er wird danach gesperrt und lässt sich nicht mehr ändern, bis die Sperre wieder aufgehoben wird.'
@@ -794,6 +814,8 @@
           />
         </label>
 
+        <h3 class="section-heading">Kontakt &amp; Einsatzort</h3>
+
         <label>
           Kunde
           <input
@@ -853,6 +875,8 @@
             disabled={locked}
           />
         </label>
+
+        <h3 class="section-heading">Weitere Angaben</h3>
 
         <label>
           Techniker
@@ -992,7 +1016,66 @@
               ></textarea>
             </label>
 
-            <h3 class="section-heading">Weitere Vorlagenfelder</h3>
+            <h3 class="section-heading">
+              Vor dem Abschließen erforderlich
+              <span class="required-hint">Pflichtfelder</span>
+            </h3>
+
+            <label>
+              Anlagenstatus <span class="required-mark" title="Pflichtfeld">*</span>
+              <select bind:value={plantStatus} onchange={() => queueSave()} disabled={locked}>
+                <option value={undefined}></option>
+                {#each PLANT_STATUS_OPTIONS as option (option)}
+                  <option value={option}>{option}</option>
+                {/each}
+              </select>
+            </label>
+
+            <div class="toggle-field">
+              <span class="toggle-label">Sicherheitseinrichtungen i.O.? <span class="required-mark" title="Pflichtfeld">*</span></span>
+              <div class="toggle-group">
+                <button
+                  type="button"
+                  class:active={securityEquipmentOk === true}
+                  disabled={locked}
+                  onclick={() => toggleSecurityEquipmentOk(true)}
+                >
+                  i.O.
+                </button>
+                <button
+                  type="button"
+                  class:active={securityEquipmentOk === false}
+                  disabled={locked}
+                  onclick={() => toggleSecurityEquipmentOk(false)}
+                >
+                  n.i.O.
+                </button>
+              </div>
+            </div>
+
+            <div class="toggle-field">
+              <span class="toggle-label">Muss ein Folgeeinsatz geplant werden? <span class="required-mark" title="Pflichtfeld">*</span></span>
+              <div class="toggle-group">
+                <button
+                  type="button"
+                  class:active={followUpVisitNeeded === true}
+                  disabled={locked}
+                  onclick={() => toggleFollowUpVisitNeeded(true)}
+                >
+                  Ja
+                </button>
+                <button
+                  type="button"
+                  class:active={followUpVisitNeeded === false}
+                  disabled={locked}
+                  onclick={() => toggleFollowUpVisitNeeded(false)}
+                >
+                  Nein
+                </button>
+              </div>
+            </div>
+
+            <h3 class="section-heading">Zusatzinformationen</h3>
 
             <label>
               Mehrungen (optional)
@@ -1044,16 +1127,6 @@
             {/if}
 
             <label>
-              Anlagenstatus (optional)
-              <select bind:value={plantStatus} onchange={() => queueSave()} disabled={locked}>
-                <option value={undefined}></option>
-                {#each PLANT_STATUS_OPTIONS as option (option)}
-                  <option value={option}>{option}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label>
               Art des Auftrags (optional)
               <select bind:value={orderType} onchange={() => queueSave()} disabled={locked}>
                 <option value={undefined}></option>
@@ -1062,28 +1135,6 @@
                 {/each}
               </select>
             </label>
-
-            <div class="toggle-field">
-              <span class="toggle-label">Sicherheitseinrichtungen i.O.?</span>
-              <div class="toggle-group">
-                <button
-                  type="button"
-                  class:active={securityEquipmentOk === true}
-                  disabled={locked}
-                  onclick={() => toggleSecurityEquipmentOk(true)}
-                >
-                  i.O.
-                </button>
-                <button
-                  type="button"
-                  class:active={securityEquipmentOk === false}
-                  disabled={locked}
-                  onclick={() => toggleSecurityEquipmentOk(false)}
-                >
-                  n.i.O.
-                </button>
-              </div>
-            </div>
 
             <label>
               Übernachtung(en) (optional)
@@ -1096,28 +1147,6 @@
                 disabled={locked}
               />
             </label>
-
-            <div class="toggle-field">
-              <span class="toggle-label">Muss ein Folgeeinsatz geplant werden?</span>
-              <div class="toggle-group">
-                <button
-                  type="button"
-                  class:active={followUpVisitNeeded === true}
-                  disabled={locked}
-                  onclick={() => toggleFollowUpVisitNeeded(true)}
-                >
-                  Ja
-                </button>
-                <button
-                  type="button"
-                  class:active={followUpVisitNeeded === false}
-                  disabled={locked}
-                  onclick={() => toggleFollowUpVisitNeeded(false)}
-                >
-                  Nein
-                </button>
-              </div>
-            </div>
           </div>
         {:else if activeTab === 'zeiten' && reportId}
           <TimeEntrySection {reportId} {locked} onChanged={refreshSummary} />
@@ -1591,6 +1620,25 @@
     color: var(--color-text);
     border-top: 1px solid var(--color-border);
     padding-top: var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .required-hint {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-danger);
+    background: var(--color-danger-bg);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+  }
+
+  .required-mark {
+    color: var(--color-danger);
+    font-weight: 700;
   }
 
   .toggle-field {
