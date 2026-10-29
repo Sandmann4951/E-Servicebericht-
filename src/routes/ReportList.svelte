@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
-  import { importServiceOrderFromFile, ServiceOrderImportError } from '../lib/import/importServiceOrder';
+  import { importServiceOrderFromFile, ServiceOrderImportError, type ServiceOrderImportPhase } from '../lib/import/importServiceOrder';
   import { getTechnicianName } from '../lib/settings';
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
@@ -24,6 +24,12 @@
   // parallel laufenden Sicherung-Import verwechselt wird.
   let serviceOrderFileInput: HTMLInputElement | undefined;
   let importOrderBusy = $state(false);
+  // Wechselt von 'extracting' auf 'ocr-fallback', sobald der (deutlich
+  // langsamere) OCR-Rescue-Versuch tatsächlich anläuft (siehe
+  // shouldAttemptOcrFallback(), utils/serviceOrderImport.ts) - steuert nur
+  // den angezeigten Hinweistext unten, damit der Nutzer währenddessen nicht
+  // denkt, die App hänge.
+  let importOrderPhase = $state<ServiceOrderImportPhase>('extracting');
   let importOrderError = $state('');
   // Rohe technische Fehlermeldung (z.B. aus der PDF-Extraktion) - wird NICHT
   // als Haupttext gezeigt (siehe handleServiceOrderFile, importOrderError
@@ -247,15 +253,23 @@
     if (!file) return;
 
     importOrderBusy = true;
+    importOrderPhase = 'extracting';
     importOrderError = '';
     importOrderErrorDetail = '';
     importOrderErrorDetailOpen = false;
     importOrderErrorDetailCopied = false;
     try {
-      const result = await importServiceOrderFromFile(file, getTechnicianName() || undefined);
+      const result = await importServiceOrderFromFile(file, getTechnicianName() || undefined, (phase) => (importOrderPhase = phase));
+      const notices: string[] = [];
       if (!result.reused && result.materialCount > 0) {
-        alert(`${result.materialCount} Materialposition(en) aus dem Serviceauftrag wurden vorausgefüllt übernommen.`);
+        notices.push(`${result.materialCount} Materialposition(en) aus dem Serviceauftrag wurden vorausgefüllt übernommen.`);
       }
+      if (result.usedOcrFallback) {
+        notices.push(
+          'Diese PDF enthielt kaum normal auslesbaren Text - die Erkennung lief deshalb per Texterkennung (OCR). OCR-Ergebnisse sind fehleranfälliger als normaler Text, bitte alle übernommenen Felder besonders sorgfältig prüfen.'
+        );
+      }
+      if (notices.length > 0) alert(notices.join('\n\n'));
       navigate(`/reports/${result.report.id}`);
     } catch (err) {
       // Nur eine gezielte ServiceOrderImportError (s. importServiceOrder.ts,
@@ -370,7 +384,13 @@
     {/if}
   {/if}
   {#if importOrderBusy}
-    <p class="backup-error import-busy">Serviceauftrag wird gelesen…</p>
+    <p class="backup-error import-busy">
+      {#if importOrderPhase === 'ocr-fallback'}
+        Serviceauftrag wird per Texterkennung gelesen (kann etwas dauern)…
+      {:else}
+        Serviceauftrag wird gelesen…
+      {/if}
+    </p>
   {/if}
 
   <DayClock onChanged={loadActiveReportId} />

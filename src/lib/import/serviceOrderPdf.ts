@@ -113,15 +113,43 @@ function ensurePromiseWithResolversPolyfill(): void {
  */
 const PDF_WORKER_CACHE_VERSION = 2;
 
-export async function extractPdfText(file: File): Promise<string> {
+/** Minimale, selbst definierte Strukturtypen statt des vollen pdfjs-dist-Typs - genau die Teile der API, die hier tatsächlich gebraucht werden (gleiches Prinzip wie `collectPageTextItems()` unten). */
+interface MinimalPdfViewport {
+  width: number;
+  height: number;
+}
+
+interface MinimalPdfPage {
+  getViewport(params: { scale: number }): MinimalPdfViewport;
+  render(params: { canvasContext: CanvasRenderingContext2D; viewport: MinimalPdfViewport }): { promise: Promise<void> };
+  streamTextContent(): ReadableStream;
+}
+
+interface MinimalPdfDocument {
+  numPages: number;
+  getPage(pageNumber: number): Promise<MinimalPdfPage>;
+}
+
+interface MinimalLoadingTask {
+  promise: Promise<MinimalPdfDocument>;
+  destroy(): Promise<void>;
+}
+
+/** Lädt pdfjs-dist nach (Polyfill + Worker-Setup, siehe Dateikommentar) und öffnet das PDF - gemeinsame Grundlage für extractPdfText()/extractPdfTextViaOcr(). */
+async function loadPdf(file: File): Promise<{ pdf: MinimalPdfDocument; loadingTask: MinimalLoadingTask }> {
   ensurePromiseWithResolversPolyfill();
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const base = import.meta.env.BASE_URL;
   pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}pdfjs/pdf.worker.min.mjs?v=${PDF_WORKER_CACHE_VERSION}`;
 
   const data = new Uint8Array(await file.arrayBuffer());
-  const loadingTask = pdfjsLib.getDocument({ data, disableFontFace: true });
+  const loadingTask = pdfjsLib.getDocument({ data, disableFontFace: true }) as unknown as MinimalLoadingTask;
   const pdf = await loadingTask.promise;
+  return { pdf, loadingTask };
+}
+
+export async function extractPdfText(file: File): Promise<string> {
+  const { pdf, loadingTask } = await loadPdf(file);
 
   try {
     const pageTexts: string[] = [];
@@ -132,6 +160,66 @@ export async function extractPdfText(file: File): Promise<string> {
     }
     return pageTexts.join('\n');
   } finally {
+    await loadingTask.destroy();
+  }
+}
+
+/**
+ * OCR-FALLBACK (Texterkennung statt echter Text-Extraktion): Liefert
+ * extractPdfText() verdächtig wenig Inhalt (siehe
+ * serviceOrderImport.ts shouldAttemptOcrFallback()), rendert diese Funktion
+ * jede PDF-Seite stattdessen als Bild (`page.render()`, wie bei einer
+ * bildlastigeren Export-Variante des Serviceauftrags nötig, bei der ein
+ * Großteil des dynamischen Inhalts als rasterisierte Bild-Streifen statt
+ * echtem Text vorliegt - pdfjs' Textextraktion liefert dafür schlicht
+ * nichts) und erkennt den Text pro Seite per `tesseract.js` (deutsches
+ * Sprachmodell, LSTM-Engine, dieselbe selbst gehostete Infrastruktur wie
+ * beim Etikett-Scan, siehe BarcodeScanner.svelte/labelOcr.ts - EIN
+ * gemeinsamer Worker für alle Seiten statt pro Seite neu zu laden, das
+ * Sprachmodell ist mit ~15 MB nicht trivial).
+ *
+ * Deutlich langsamer als extractPdfText() (mehrere Sekunden PRO Seite,
+ * Rendern + Texterkennung) - wird deshalb nur als Rescue-Versuch
+ * aufgerufen, nicht standardmäßig. `scale: 2` beim Rendern (statt der
+ * PDF-eigenen 72dpi-Standardauflösung) verbessert die OCR-Trefferquote
+ * deutlich, ohne die Erkennung unnötig zu verlangsamen.
+ *
+ * Der erkannte Text hat ECHTE Leerzeichen zwischen Wörtern (anders als die
+ * absichtlich leerzeichenlose Zeilen-Verschmelzung von extractPdfText(),
+ * s. dessen Dateikommentar) - parseServiceOrderText() toleriert beide
+ * Formen (siehe dort ITEM_LINE/SECTION_HEADER_LINE).
+ */
+export async function extractPdfTextViaOcr(file: File): Promise<string> {
+  const { pdf, loadingTask } = await loadPdf(file);
+  const { createWorker } = await import('tesseract.js');
+  const base = import.meta.env.BASE_URL;
+  const worker = await createWorker('deu', 1, {
+    workerPath: `${base}tesseract/worker.min.js`,
+    corePath: `${base}tesseract/tesseract-core-lstm.wasm.js`,
+    langPath: `${base}tessdata`,
+    gzip: true
+  });
+
+  try {
+    const pageTexts: string[] = [];
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Kein Canvas-Kontext für OCR-Rendering verfügbar');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const {
+        data: { text }
+      } = await worker.recognize(canvas);
+      pageTexts.push(text);
+    }
+    return pageTexts.join('\n');
+  } finally {
+    await worker.terminate();
     await loadingTask.destroy();
   }
 }

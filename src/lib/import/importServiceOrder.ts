@@ -1,8 +1,13 @@
 import { addMaterialItem, listMaterialItems } from '../db/materialItems';
 import { createReport, listReportsByProjectNumber } from '../db/reports';
 import type { ServiceReport } from '../db/types';
-import { extractPdfText } from './serviceOrderPdf';
-import { parseServiceOrderText, type ParsedServiceOrder, type ParsedServiceOrderMaterial } from '../utils/serviceOrderImport';
+import { extractPdfText, extractPdfTextViaOcr } from './serviceOrderPdf';
+import {
+  parseServiceOrderText,
+  shouldAttemptOcrFallback,
+  type ParsedServiceOrder,
+  type ParsedServiceOrderMaterial
+} from '../utils/serviceOrderImport';
 
 /**
  * Eigene Error-Klasse für erwartete, nutzerverständliche Fehler (z.B. keine
@@ -39,7 +44,18 @@ export interface ServiceOrderImportResult {
   materialCount: number;
   /** true, wenn ein bereits offener Bericht mit dieser Projektnummer wiederverwendet wurde, statt einen neuen anzulegen. */
   reused: boolean;
+  /**
+   * true, wenn die normale Text-Extraktion zu wenig lieferte (siehe
+   * shouldAttemptOcrFallback(), utils/serviceOrderImport.ts) und stattdessen
+   * per Texterkennung (OCR, extractPdfTextViaOcr()) gelesen wurde - OCR-
+   * Ergebnisse sind fehleranfälliger als normaler Text, die UI zeigt in
+   * diesem Fall einen zusätzlichen Hinweis (siehe ReportList.svelte).
+   */
+  usedOcrFallback: boolean;
 }
+
+/** Mögliche Phasen während des Imports - für einen UI-Hinweistext, der sich ändert, sobald der (deutlich langsamere) OCR-Rescue-Versuch tatsächlich anläuft. */
+export type ServiceOrderImportPhase = 'extracting' | 'ocr-fallback';
 
 /**
  * Baut den Notizen-Text für den neu angelegten Bericht - Serviceauftrags-
@@ -85,9 +101,14 @@ function buildImportNotes(parsed: ParsedServiceOrder): string | undefined {
  * generischen Hinweis statt der rohen Fehlermeldung, siehe
  * ReportList.svelte handleServiceOrderFile().
  */
-export async function importServiceOrderFromFile(file: File, technicianName?: string): Promise<ServiceOrderImportResult> {
+export async function importServiceOrderFromFile(
+  file: File,
+  technicianName?: string,
+  onPhaseChange?: (phase: ServiceOrderImportPhase) => void
+): Promise<ServiceOrderImportResult> {
   let rawText: string;
   try {
+    onPhaseChange?.('extracting');
     rawText = await extractPdfText(file);
   } catch (err) {
     throw stageError('PDF-Extraktion', err);
@@ -98,6 +119,30 @@ export async function importServiceOrderFromFile(file: File, technicianName?: st
     parsed = parseServiceOrderText(rawText);
   } catch (err) {
     throw stageError('Text-Interpretation', err);
+  }
+
+  // Rescue-Versuch: verdächtig wenig Inhalt (typisch für eine bildlastigere
+  // Export-Variante des Serviceauftrags, bei der ein Großteil des
+  // dynamischen Inhalts als rasterisiertes Bild statt echtem Text vorliegt)
+  // - BEVOR der Import unten mit "keine Projektnummer gefunden" aufgibt,
+  // wird zusätzlich versucht, dieselbe PDF per Texterkennung (OCR) zu
+  // lesen. Schlägt das technisch fehl (z.B. Tesseract-Ladefehler), wird das
+  // bewusst NICHT als eigener Fehler nach oben gereicht - es ist nur ein
+  // Rescue-Versuch, bei der ohnehin unzureichenden normalen Extraktion samt
+  // deren Fehlermeldung weiter unten bleibt es dann einfach.
+  let usedOcrFallback = false;
+  if (shouldAttemptOcrFallback(rawText, parsed)) {
+    try {
+      onPhaseChange?.('ocr-fallback');
+      const ocrText = await extractPdfTextViaOcr(file);
+      const ocrParsed = parseServiceOrderText(ocrText);
+      if (ocrParsed.projectNumber) {
+        parsed = ocrParsed;
+        usedOcrFallback = true;
+      }
+    } catch (err) {
+      console.warn('OCR-Fallback für Serviceauftrag-Import fehlgeschlagen - bleibe bei der normalen Extraktion', err);
+    }
   }
 
   if (!parsed.projectNumber) {
@@ -147,7 +192,7 @@ export async function importServiceOrderFromFile(file: File, technicianName?: st
       });
     }
 
-    return { report, parsed, materialCount: materialsToAdd.length, reused };
+    return { report, parsed, materialCount: materialsToAdd.length, reused, usedOcrFallback };
   } catch (err) {
     throw stageError('Bericht anlegen/Material speichern', err);
   }

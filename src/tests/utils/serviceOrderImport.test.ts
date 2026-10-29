@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseServiceOrderText } from '../../lib/utils/serviceOrderImport';
+import { parseServiceOrderText, shouldAttemptOcrFallback } from '../../lib/utils/serviceOrderImport';
 
 // Die exakten Zeilen, die pdfjs-dist (siehe src/lib/import/serviceOrderPdf.ts)
 // aus einem echten ELSA-Serviceauftrag-PDF extrahiert - Text auf derselben
@@ -147,5 +147,53 @@ describe('parseServiceOrderText', () => {
     const raw = ['Projektnr.: 999999', 'Projektnummer: 264235'].join('\n');
     const result = parseServiceOrderText(raw);
     expect(result.projectNumber).toBe('264235');
+  });
+
+  describe('Tabellenzeilen mit echten Leerzeichen (OCR-Fallback-Format statt der leerzeichenlosen pdfjs-Verschmelzung)', () => {
+    // Dieselbe Positionstabelle wie in SAMPLE_RAW, aber mit echten
+    // Leerzeichen statt der pdfjs-typischen Verschmelzung - so, wie
+    // extractPdfTextViaOcr() (serviceOrderPdf.ts) den Text tatsächlich
+    // liefert (Tesseract erkennt die im Dokument gedruckten Wortabstände).
+    const SAMPLE_RAW_OCR_SPACED = [
+      'Pos. Menge Ein. Text',
+      '1 Kabelkanal Markiese 1.OG',
+      '1.010 4 m Leitungsführungskanal LF 15x15 vw',
+      '1.020 4 m Schlauchleitung H05VV-F 3G1,5',
+      '1.030 1 Stck Winkel LF-Kanal'
+    ].join('\n');
+
+    it('erkennt Material-Positionen auch mit echten Leerzeichen zwischen Position/Menge/Einheit/Text', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_OCR_SPACED);
+      expect(result.materials).toEqual([
+        { description: 'Leitungsführungskanal LF 15x15 vw', quantity: 4, unit: 'm' },
+        { description: 'Schlauchleitung H05VV-F 3G1,5', quantity: 4, unit: 'm' },
+        { description: 'Winkel LF-Kanal', quantity: 1, unit: 'Stk' }
+      ]);
+    });
+  });
+
+  describe('shouldAttemptOcrFallback', () => {
+    it('ist true, wenn der extrahierte Text sehr kurz ist und weder Kunde noch Material erkannt wurden (bildlastigere PDF-Variante)', () => {
+      const parsed = parseServiceOrderText(SAMPLE_RAW_IMAGE_HEAVY);
+      expect(shouldAttemptOcrFallback(SAMPLE_RAW_IMAGE_HEAVY, parsed)).toBe(true);
+    });
+
+    it('ist false für die normale, ausführliche Beispieldatei (genug Text, Kunde und Material erkannt)', () => {
+      const parsed = parseServiceOrderText(SAMPLE_RAW);
+      expect(shouldAttemptOcrFallback(SAMPLE_RAW, parsed)).toBe(false);
+    });
+
+    it('ist false, wenn der Text zwar kurz ist, aber trotzdem schon ein Kunde oder Material erkannt wurde (kein Rescue-Fall nötig)', () => {
+      const shortButReadable = ['-KUNDENDATEN -', 'Frau', 'Max Mustermann'].join('\n');
+      const parsed = parseServiceOrderText(shortButReadable);
+      expect(parsed.customer).toBe('Max Mustermann');
+      expect(shouldAttemptOcrFallback(shortButReadable, parsed)).toBe(false);
+    });
+
+    it('ist false für einen hinreichend langen Text, selbst ohne erkannten Kunden/Material', () => {
+      const longButUnrecognizable = 'x'.repeat(600);
+      const parsed = parseServiceOrderText(longButUnrecognizable);
+      expect(shouldAttemptOcrFallback(longButUnrecognizable, parsed)).toBe(false);
+    });
   });
 });

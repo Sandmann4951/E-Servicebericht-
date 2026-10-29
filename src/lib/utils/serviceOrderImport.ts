@@ -22,6 +22,18 @@
  * vw") - Menge und Einheit lassen sich deshalb nicht über Leerzeichen
  * trennen, sondern nur über eine Liste bekannter Einheiten-Schreibweisen
  * (KNOWN_UNITS) erkennen.
+ *
+ * OCR-FALLBACK: Bei einer bildlastigeren Export-Variante des Service-
+ * auftrags (ein Großteil des dynamischen Inhalts liegt dort als
+ * rasterisiertes Bild statt echtem Text vor) liefert extractPdfText()
+ * verdächtig wenig Inhalt - importServiceOrder.ts versucht dann
+ * automatisch stattdessen extractPdfTextViaOcr() (Texterkennung,
+ * serviceOrderPdf.ts), siehe shouldAttemptOcrFallback() unten für die
+ * genaue Schwellwert-Logik. OCR-Text hat ECHTE Leerzeichen zwischen
+ * Wörtern/Spalten (anders als die obige leerzeichenlose Verschmelzung) -
+ * ITEM_LINE/SECTION_HEADER_LINE tolerieren deshalb beide Formen über
+ * optionale "\s*" zwischen den Teilen, statt zwei getrennte Parser zu
+ * pflegen.
  */
 export interface ParsedServiceOrderMaterial {
   description: string;
@@ -66,9 +78,16 @@ const UNIT_PATTERN = KNOWN_UNITS.join('|');
 // z.B. bei "3.01020mNYY-J 3x2,5" (Pos. 3.010, Menge 20, Einheit m) nicht
 // erkennbar, wo die Unterposition endet und die Menge beginnt - beide sind
 // nur Ziffern, ohne jedes Trennzeichen direkt aneinandergereiht.
-const ITEM_LINE = new RegExp(`^\\d+\\.\\d{3}(\\d+(?:[.,]\\d+)?)(${UNIT_PATTERN})(.+)$`);
-// z.B. "1Kabelkanal Markiese 1.OG" -> Abschnitt "1", Titel "Kabelkanal Markiese 1.OG".
-const SECTION_HEADER_LINE = /^\d+([A-Za-zÄÖÜäöüß].*)$/;
+//
+// Die "\s*" zwischen den Teilen sind bewusst OPTIONAL (nicht verpflichtend):
+// pdfjs' Text-Extraktion (extractPdfText(), serviceOrderPdf.ts) verschmilzt
+// Text derselben Zeile komplett ohne Trennzeichen (s.o.), während ein
+// Texterkennung-Fallback (extractPdfTextViaOcr()) echte, im Dokument
+// gedruckte Leerzeichen zwischen den Spalten liefert - ein gemeinsamer
+// Parser statt zwei getrennter Implementierungen, der beide Formen versteht.
+const ITEM_LINE = new RegExp(`^\\d+\\.\\d{3}\\s*(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_PATTERN})\\s*(.+)$`);
+// z.B. "1Kabelkanal Markiese 1.OG" (pdfjs) oder "1 Kabelkanal Markiese 1.OG" (OCR) -> Abschnitt "1", Titel "Kabelkanal Markiese 1.OG".
+const SECTION_HEADER_LINE = /^\d+\s*([A-Za-zÄÖÜäöüß].*)$/;
 
 const TABLE_HEADER_LINE = /^Pos\.?\s*Menge\s*Ein\.?\s*Text/i;
 const PAGE_FOOTER_LINE = /^Seite\s+\d+\s+von\s+\d+$/i;
@@ -222,4 +241,32 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
     plannedLaborHours: plannedLaborHoursSum > 0 ? plannedLaborHoursSum : undefined,
     raw
   };
+}
+
+/**
+ * Minimale Zeichenzahl, ab der eine normale Text-Extraktion (extractPdfText(),
+ * serviceOrderPdf.ts) als "ausreichend" gilt - rein empirisch an der echten,
+ * normal auslesbaren Hanslbauer-Beispieldatei (mehrere Tausend Zeichen)
+ * gegenüber der bildlastigeren Klenzestraße-Variante (nur die statische
+ * Kopf-Info-Box bleibt echter Text, keine 300 Zeichen) kalibriert - bewusst
+ * deutlich näher an letzterer als an ersterer, um auch ein PDF mit nur EINER
+ * Materialposition (kurzer, aber vollständig lesbarer Text) nicht
+ * fälschlich als "zu wenig" einzustufen.
+ */
+const MIN_TEXT_LENGTH_BEFORE_OCR_FALLBACK = 500;
+
+/**
+ * Entscheidet, ob sich ein OCR-Fallback (extractPdfTextViaOcr(),
+ * serviceOrderPdf.ts) lohnen könnte: die normale Text-Extraktion lieferte
+ * verdächtig wenig UND daraus ließ sich weder ein Kunde noch irgendein
+ * Material erkennen - typisch für eine bildlastigere Export-Variante des
+ * Serviceauftrags, bei der ein Großteil des dynamischen Inhalts als
+ * rasterisiertes Bild statt echtem Text vorliegt. Ein PDF mit tatsächlich
+ * wenig Inhalt, aber vollständig lesbarem Text (z.B. nur eine einzelne
+ * Material-Position), löst den Fallback NICHT fälschlich aus, da dort
+ * bereits Kunde und/oder Material erkannt werden.
+ */
+export function shouldAttemptOcrFallback(rawText: string, parsed: ParsedServiceOrder): boolean {
+  if (rawText.trim().length >= MIN_TEXT_LENGTH_BEFORE_OCR_FALLBACK) return false;
+  return !parsed.customer && parsed.materials.length === 0;
 }
