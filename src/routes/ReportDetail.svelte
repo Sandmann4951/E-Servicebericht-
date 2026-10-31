@@ -498,19 +498,19 @@
    * raten zu müssen, wo er suchen soll.
    * @returns true, wenn blockiert wurde (Aufrufer muss dann abbrechen).
    */
-  function blockFinalizeIfFieldsMissing(): boolean {
+  function blockIfRequiredFieldsMissing(action: 'abschließen' | 'exportieren'): boolean {
     const missing = missingRequiredFieldsForFinalize({ plantStatus, securityEquipmentOk, followUpVisitNeeded });
     if (missing.length === 0) return false;
     activeTab = 'übersicht';
     alert(
-      `Bericht kann noch nicht abgeschlossen werden. Bitte zuerst folgende Pflichtfelder in der Übersicht ausfüllen:\n\n${missing.map((field) => `• ${field}`).join('\n')}`
+      `Bericht kann noch nicht ${action} werden. Bitte zuerst folgende Pflichtfelder in der Übersicht ausfüllen:\n\n${missing.map((field) => `• ${field}`).join('\n')}`
     );
     return true;
   }
 
   async function saveSignature(blob: Blob, name: string, width: number, height: number): Promise<void> {
     if (!reportId) return;
-    if (blockFinalizeIfFieldsMissing()) return;
+    if (blockIfRequiredFieldsMissing('abschließen')) return;
     const updated = await setReportSignature(reportId, { blob, signedByName: name, width, height });
     if (!updated) return;
     signatureBlob = updated.signatureBlob;
@@ -529,7 +529,7 @@
   /** Schließt den Bericht final ab, ohne Kunden-Unterschrift - z.B. wenn keine Unterschrift nötig oder möglich ist. */
   async function finalizeWithoutSignature(): Promise<void> {
     if (!reportId || locked) return;
-    if (blockFinalizeIfFieldsMissing()) return;
+    if (blockIfRequiredFieldsMissing('abschließen')) return;
     if (
       !confirm(
         'Bericht ohne Kunden-Unterschrift final abschließen? Er wird danach gesperrt und lässt sich nicht mehr ändern, bis die Sperre wieder aufgehoben wird.'
@@ -607,6 +607,7 @@
 
   async function exportReport(): Promise<void> {
     if (!reportId || exporting) return;
+    if (blockIfRequiredFieldsMissing('exportieren')) return;
     exporting = true;
     exportError = false;
     try {
@@ -812,6 +813,16 @@
             placeholder="z.B. Zählerschrank-Sanierung EG"
             disabled={locked}
           />
+        </label>
+
+        <label>
+          Art des Auftrags (optional)
+          <select bind:value={orderType} onchange={() => queueSave()} disabled={locked}>
+            <option value={undefined}></option>
+            {#each ORDER_TYPE_OPTIONS as option (option)}
+              <option value={option}>{option}</option>
+            {/each}
+          </select>
         </label>
 
         <h3 class="section-heading">Kontakt &amp; Einsatzort</h3>
@@ -1125,16 +1136,6 @@
                 />
               </label>
             {/if}
-
-            <label>
-              Art des Auftrags (optional)
-              <select bind:value={orderType} onchange={() => queueSave()} disabled={locked}>
-                <option value={undefined}></option>
-                {#each ORDER_TYPE_OPTIONS as option (option)}
-                  <option value={option}>{option}</option>
-                {/each}
-              </select>
-            </label>
 
             <label>
               Übernachtung(en) (optional)
