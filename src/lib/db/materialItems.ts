@@ -70,6 +70,36 @@ export async function updateMaterialItem(id: ID, patch: Partial<MaterialItemInpu
   return merged;
 }
 
+/**
+ * Markiert die angegebenen Materialpositionen als vollständig berichtet
+ * (siehe MaterialItem.reportedQuantity) - nach einem erfolgreichen
+ * Word-Export aufgerufen (siehe ReportDetail.svelte exportReport(),
+ * lib/export/exportScope.ts) mit genau den IDs der Positionen, die
+ * tatsächlich in diesem Export enthalten waren. Setzt `reportedQuantity`
+ * jeweils auf die AKTUELLE `quantity` der Position (vollständig aufgeholt) -
+ * nicht auf einen von außen übergebenen Wert, da beim Export-Modus
+ * "Nur Neues" nur der Rest exportiert wird, aber danach die GESAMTE
+ * aktuelle Menge als berichtet gelten soll. Bewusst ohne
+ * recomputeReportSummary()-Aufruf: `reportedQuantity` beeinflusst keines
+ * der denormalisierten Summary-Felder auf ServiceReport. Nicht (mehr)
+ * existierende IDs werden einfach übersprungen.
+ */
+export async function markMaterialItemsReported(ids: readonly ID[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDB();
+  const tx = db.transaction('materialItems', 'readwrite');
+  const store = tx.objectStore('materialItems');
+  const now = new Date().toISOString();
+  for (const id of ids) {
+    const item = await store.get(id);
+    if (!item) continue;
+    item.reportedQuantity = item.quantity;
+    item.updatedAt = now;
+    await store.put(item);
+  }
+  await tx.done;
+}
+
 export async function deleteMaterialItem(id: ID): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(ALL_STORES, 'readwrite');

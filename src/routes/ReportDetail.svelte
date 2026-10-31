@@ -10,7 +10,8 @@
     unlockReport,
     updateReport
   } from '../lib/db/reports';
-  import { getActiveTimeEntry } from '../lib/db/timeEntries';
+  import { getActiveTimeEntry, markTimeEntriesReported } from '../lib/db/timeEntries';
+  import { markMaterialItemsReported } from '../lib/db/materialItems';
   import { switchToIdle } from '../lib/clockActions';
   import type { OrderType, PlantStatus, ReportStatus, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -18,6 +19,7 @@
   import { formatDateTimeDE, formatDurationMinutes } from '../lib/utils/date';
   import { splitContactPersonAndPhone } from '../lib/utils/contactPerson';
   import { missingRequiredFieldsForFinalize } from '../lib/utils/reportFinalization';
+  import { filterToUnreportedOnly, hasUnreportedContent, reportNeverExported } from '../lib/export/exportScope';
   import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
   import TimeEntrySection from '../lib/components/TimeEntrySection.svelte';
@@ -187,6 +189,12 @@
   let duplicateWarningDismissed = false;
   let exporting = $state(false);
   let exportError = $state(false);
+  // Erhöht sich nach jedem Export, bei dem Zeiten/Material als "berichtet"
+  // markiert wurden - TimeEntrySection/MaterialSection lesen diesen Wert nur,
+  // um ihren $effect zum Neuladen anzustoßen (siehe dort), er hat sonst keine
+  // eigene Bedeutung. Ohne das würden die gerade erst gesetzten
+  // reportedAt/reportedQuantity-Werte erst nach einem Tab-Wechsel sichtbar.
+  let listsVersion = $state(0);
 
   function flashSaved(): void {
     savedPulseVisible = true;
@@ -605,6 +613,21 @@
     navigate('/', { replace: true });
   }
 
+  /**
+   * Markiert nach einem erfolgreichen Export genau die Zeiten/Material, die
+   * tatsächlich in `exportedData` enthalten waren (bei "Nur Neues" also nur
+   * der vorher offene Teil - siehe exportScope.ts) als berichtet, sowie den
+   * Bericht selbst als exportiert. `listsVersion++` stößt TimeEntrySection/
+   * MaterialSection zum Neuladen an, damit die "berichtet"-Kennzeichnung
+   * sofort sichtbar wird, ohne dass der Nutzer den Tab wechseln muss.
+   */
+  async function markExportedScope(exportedReportId: string, exportedData: { timeEntries: { id: string }[]; materialItems: { id: string }[] }): Promise<void> {
+    await markTimeEntriesReported(exportedData.timeEntries.map((entry) => entry.id));
+    await markMaterialItemsReported(exportedData.materialItems.map((item) => item.id));
+    await markReportExported(exportedReportId);
+    listsVersion++;
+  }
+
   async function exportReport(): Promise<void> {
     if (!reportId || exporting) return;
     if (blockIfRequiredFieldsMissing('exportieren')) return;
@@ -615,8 +638,28 @@
         import('../lib/export/getFullReport'),
         import('../lib/export/docxExport')
       ]);
-      const data = await getFullReport(reportId);
-      if (!data) return;
+      const fullData = await getFullReport(reportId);
+      if (!fullData) return;
+
+      // Wurde dieser Bericht schon mindestens einmal exportiert (z.B. erster
+      // Einsatz bereits abgerechnet, jetzt ein Gewährleistungs-Folgeeinsatz),
+      // nachfragen, ob wirklich alles nochmal raus soll oder nur das seither
+      // Neue - siehe lib/export/exportScope.ts. Beim allerersten Export gibt
+      // es noch nichts "Altes", die Abfrage entfällt dann bewusst.
+      let data = fullData;
+      if (!reportNeverExported(fullData.report)) {
+        const wantsNewOnly = confirm(
+          `Dieser Bericht wurde bereits am ${formatDateTimeDE(fullData.report.exportedAt!)} exportiert.\n\n` +
+            'OK = Nur das Neue seit dem letzten Export exportieren\nAbbrechen = Trotzdem alles erneut exportieren'
+        );
+        if (wantsNewOnly) {
+          if (!hasUnreportedContent(fullData)) {
+            alert('Es gibt seit dem letzten Export nichts Neues zu berichten - alle Zeiten und das gesamte Material wurden bereits exportiert.');
+            return;
+          }
+          data = filterToUnreportedOnly(fullData);
+        }
+      }
 
       const blob = await buildReportDocx(data);
       const fileName = suggestedFileName(data.report);
@@ -639,7 +682,7 @@
       if (navigator.canShare?.({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: fileName });
-          await markReportExported(reportId);
+          await markExportedScope(reportId, data);
           return;
         } catch (shareErr) {
           // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler - dort
@@ -658,7 +701,7 @@
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      await markReportExported(reportId);
+      await markExportedScope(reportId, data);
     } catch (err) {
       exportError = true;
       console.error('Export fehlgeschlagen', err);
@@ -1150,9 +1193,9 @@
             </label>
           </div>
         {:else if activeTab === 'zeiten' && reportId}
-          <TimeEntrySection {reportId} {locked} onChanged={refreshSummary} />
+          <TimeEntrySection {reportId} {locked} {listsVersion} onChanged={refreshSummary} />
         {:else if activeTab === 'material' && reportId}
-          <MaterialSection {reportId} {locked} onChanged={refreshSummary} />
+          <MaterialSection {reportId} {locked} {listsVersion} onChanged={refreshSummary} />
         {:else if activeTab === 'fotos' && reportId}
           <PhotoSection {reportId} {locked} onChanged={refreshSummary} />
         {:else if activeTab === 'unterschrift' && reportId}

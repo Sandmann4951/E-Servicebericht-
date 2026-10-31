@@ -223,6 +223,18 @@ export interface TimeEntry {
   isTravel?: boolean;
   /** Gefahrene Kilometer - nur bei Fahrtzeit-Einträgen (isTravel), beim Bearbeiten im Zeiten-Tab eintragbar. */
   kilometers?: number;
+  /**
+   * Gesetzt, sobald dieser Eintrag Teil eines Word-Exports war (siehe
+   * lib/export/exportScope.ts/markTimeEntriesReported() in timeEntries.ts) -
+   * `undefined` bedeutet "noch nicht berichtet" (auch für alle Einträge, die
+   * vor Einführung dieses Felds angelegt wurden - korrektes Standardverhalten,
+   * keine Migration nötig). Grundlage für den Export-Modus "Nur Neues seit
+   * letztem Export" bei einem später (z.B. Gewährleistungsfall) erneut
+   * geöffneten Bericht, sowie für die "berichtet"-Kennzeichnung in der
+   * Zeitenliste (TimeEntrySection.svelte). Rein intern gesetzt, kein
+   * Formularfeld.
+   */
+  reportedAt?: ISODateTime;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -306,6 +318,17 @@ export interface MaterialItem {
    * selbst als Spaltenbezeichnung nutzt.
    */
   source?: 'lager' | 'bestellung';
+  /**
+   * Menge dieser Position, die bereits in einem früheren Word-Export
+   * enthalten war (siehe lib/export/exportScope.ts/markMaterialItemsReported()
+   * in materialItems.ts) - kann kleiner als `quantity` sein, wenn nachträglich
+   * mehr verbaut wurde (z.B. bei einem Gewährleistungs-Folgeeinsatz).
+   * `undefined`/`0` bedeutet "noch nichts davon berichtet". Rest = `quantity
+   * - (reportedQuantity ?? 0)`. Grundlage für den Export-Modus "Nur Neues
+   * seit letztem Export" sowie die "X von Y bereits berichtet"-Anzeige in
+   * MaterialSection.svelte. Rein intern gesetzt, kein Formularfeld.
+   */
+  reportedQuantity?: number;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }

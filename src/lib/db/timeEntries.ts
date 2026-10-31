@@ -376,3 +376,28 @@ export async function restoreBreak(id: ID): Promise<void> {
 
   await deleteTimeEntry(id);
 }
+
+/**
+ * Markiert die angegebenen Zeiteinträge als berichtet (siehe
+ * TimeEntry.reportedAt) - nach einem erfolgreichen Word-Export aufgerufen
+ * (siehe ReportDetail.svelte exportReport(), lib/export/exportScope.ts) mit
+ * genau den IDs der Einträge, die tatsächlich in diesem Export enthalten
+ * waren. Bewusst ohne recomputeReportSummary()-Aufruf: `reportedAt`
+ * beeinflusst keines der denormalisierten Summary-Felder auf ServiceReport.
+ * Nicht (mehr) existierende IDs werden einfach übersprungen.
+ */
+export async function markTimeEntriesReported(ids: readonly ID[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDB();
+  const tx = db.transaction('timeEntries', 'readwrite');
+  const store = tx.objectStore('timeEntries');
+  const now = new Date().toISOString();
+  for (const id of ids) {
+    const entry = await store.get(id);
+    if (!entry) continue;
+    entry.reportedAt = now;
+    entry.updatedAt = now;
+    await store.put(entry);
+  }
+  await tx.done;
+}

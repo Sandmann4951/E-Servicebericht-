@@ -9,6 +9,7 @@ import {
   getGloballyActiveTimeEntry,
   listTimeEntries,
   listTimeEntriesForDate,
+  markTimeEntriesReported,
   trimOverlappingTimeEntries,
   updateTimeEntry
 } from '../../lib/db/timeEntries';
@@ -401,5 +402,34 @@ describe('listTimeEntriesForDate (Tagesbilanz über mehrere Tagesstempel-Zyklen 
     const entries = await listTimeEntriesForDate('2026-08-11');
 
     expect(entries.map((e) => e.startTime)).toEqual(['08:00', '14:00']);
+  });
+});
+
+describe('markTimeEntriesReported (Export-Tracking, s. lib/export/exportScope.ts)', () => {
+  it('legt einen Eintrag ohne reportedAt an (noch nicht berichtet)', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const entry = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+
+    expect(entry.reportedAt).toBeUndefined();
+    const [stored] = await listTimeEntries(report.id);
+    expect(stored.reportedAt).toBeUndefined();
+  });
+
+  it('setzt reportedAt bei den angegebenen IDs, lässt andere Einträge unberührt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const first = await addTimeEntry(report.id, { date: '2026-08-10', startTime: '08:00', endTime: '12:00' });
+    const second = await addTimeEntry(report.id, { date: '2026-08-11', startTime: '08:00', endTime: '12:00' });
+
+    await markTimeEntriesReported([first.id]);
+
+    const entries = await listTimeEntries(report.id);
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    expect(byId.get(first.id)?.reportedAt).toBeTruthy();
+    expect(byId.get(second.id)?.reportedAt).toBeUndefined();
+  });
+
+  it('ignoriert eine leere ID-Liste und nicht (mehr) existierende IDs, ohne zu werfen', async () => {
+    await expect(markTimeEntriesReported([])).resolves.toBeUndefined();
+    await expect(markTimeEntriesReported(['does-not-exist'])).resolves.toBeUndefined();
   });
 });

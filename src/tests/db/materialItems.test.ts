@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetTestDB } from '../testUtils';
-import { addMaterialItem, listMaterialItems, updateMaterialItem } from '../../lib/db/materialItems';
+import { addMaterialItem, listMaterialItems, markMaterialItemsReported, updateMaterialItem } from '../../lib/db/materialItems';
 import { createReport } from '../../lib/db/reports';
 
 beforeEach(async () => {
@@ -71,5 +71,54 @@ describe('materialItems repository - source (Lager/Bestellung)', () => {
 
     const updated = await updateMaterialItem(item.id, { source: undefined });
     expect(updated?.source).toBeUndefined();
+  });
+});
+
+describe('markMaterialItemsReported (Export-Tracking, s. lib/export/exportScope.ts)', () => {
+  it('legt eine Position ohne reportedQuantity an (noch nichts berichtet)', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const item = await addMaterialItem(report.id, { description: 'Kabel NYM-J 3x1,5', quantity: 10, unit: 'm' });
+
+    expect(item.reportedQuantity).toBeUndefined();
+  });
+
+  it('setzt reportedQuantity auf die aktuelle quantity der angegebenen Positionen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const item = await addMaterialItem(report.id, { description: 'Kabel NYM-J 3x1,5', quantity: 10, unit: 'm' });
+
+    await markMaterialItemsReported([item.id]);
+
+    const [stored] = await listMaterialItems(report.id);
+    expect(stored.reportedQuantity).toBe(10);
+  });
+
+  it('holt bei einem erneuten Aufruf mit größerer quantity vollständig auf (Nachbuchung)', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const item = await addMaterialItem(report.id, { description: 'Kabel NYM-J 3x1,5', quantity: 10, unit: 'm' });
+    await markMaterialItemsReported([item.id]);
+
+    await updateMaterialItem(item.id, { quantity: 16 });
+    await markMaterialItemsReported([item.id]);
+
+    const [stored] = await listMaterialItems(report.id);
+    expect(stored.reportedQuantity).toBe(16);
+  });
+
+  it('lässt nicht angegebene Positionen unberührt', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const reported = await addMaterialItem(report.id, { description: 'Sicherung', quantity: 2, unit: 'Stk' });
+    const untouched = await addMaterialItem(report.id, { description: 'Zählerschrank', quantity: 1, unit: 'Stk' });
+
+    await markMaterialItemsReported([reported.id]);
+
+    const items = await listMaterialItems(report.id);
+    const byId = new Map(items.map((entry) => [entry.id, entry]));
+    expect(byId.get(reported.id)?.reportedQuantity).toBe(2);
+    expect(byId.get(untouched.id)?.reportedQuantity).toBeUndefined();
+  });
+
+  it('ignoriert eine leere ID-Liste und nicht (mehr) existierende IDs, ohne zu werfen', async () => {
+    await expect(markMaterialItemsReported([])).resolves.toBeUndefined();
+    await expect(markMaterialItemsReported(['does-not-exist'])).resolves.toBeUndefined();
   });
 });

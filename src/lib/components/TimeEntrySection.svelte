@@ -12,9 +12,18 @@
   import { centeredBreakWindow, computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
   import { exceedsMaxDailyWork } from '../utils/arbzg';
   import { appendPerformedWorkLine, formatTimeEntryPerformedWorkLine, shouldAppendPerformedWorkLine } from '../utils/performedWorkNote';
+  import { isTimeEntryReported } from '../export/exportScope';
   import Icon from './Icon.svelte';
 
-  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
+  let {
+    reportId,
+    locked = false,
+    // Ändert sich nach einem Export, bei dem Einträge als "berichtet"
+    // markiert wurden (siehe ReportDetail.svelte markExportedScope()) - nur
+    // dazu da, den $effect unten erneut auszulösen, kein eigener Sinn.
+    listsVersion = 0,
+    onChanged
+  }: { reportId: string; locked?: boolean; listsVersion?: number; onChanged: () => void } = $props();
 
   let entries = $state<TimeEntry[]>([]);
   let loading = $state(true);
@@ -50,6 +59,7 @@
 
   $effect(() => {
     reportId;
+    listsVersion;
     load();
   });
 
@@ -313,12 +323,13 @@
       <ul class="list">
         {#each entries as entry (entry.id)}
           {@const exceedsMax = exceedsMaxDailyWork(entry.durationMinutes)}
-          <li class="row" class:exceeds-max={exceedsMax} class:editing={!locked && editingId === entry.id}>
+          {@const reported = isTimeEntryReported(entry)}
+          <li class="row" class:exceeds-max={exceedsMax} class:editing={!locked && editingId === entry.id} class:reported>
             {#if !locked && editingId === entry.id}
               {@render entryForm()}
             {:else if locked}
               <div class="row-main">
-                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}{#if reported}<span class="reported-tag" title="Bereits in einem Export enthalten">berichtet</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
@@ -332,7 +343,7 @@
               </div>
             {:else}
               <button type="button" class="row-main" onclick={() => startEdit(entry)}>
-                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}</span>
+                <span class="date">{formatDateDE(entry.date)}{#if entry.isTravel}<span class="travel-tag"><Icon name="truck" size={13} />Fahrtzeit{#if entry.kilometers !== undefined}{` · ${String(entry.kilometers).replace(".", ",")} km`}{/if}</span>{/if}{#if reported}<span class="reported-tag" title="Bereits in einem Export enthalten">berichtet</span>{/if}</span>
                 <span class="meta">
                   {#if entry.startTime && entry.endTime}{entry.startTime}–{entry.endTime} Uhr ·{/if}
                   {formatDurationMinutes(entry.durationMinutes)}
@@ -408,6 +419,23 @@
   .row.exceeds-max {
     background: var(--color-danger-bg);
     border-color: var(--color-danger);
+  }
+
+  /* Dezent gedämpft statt auffällig markiert - bereits exportierte Einträge
+     sind der Normalfall nach einem erfolgten Export, kein Fehlerzustand. */
+  .row.reported {
+    opacity: 0.6;
+  }
+
+  .reported-tag {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    padding: 1px 8px;
   }
 
   .row-main {

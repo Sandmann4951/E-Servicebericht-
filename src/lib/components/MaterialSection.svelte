@@ -4,10 +4,19 @@
   import { STANDARD_MATERIALS } from '../materialCatalog';
   import { parseScannedMaterialLabel } from '../utils/materialScan';
   import { parseLabelText } from '../utils/labelOcr';
+  import { isMaterialItemFullyReported } from '../export/exportScope';
   import Icon from './Icon.svelte';
   import BarcodeScanner from './BarcodeScanner.svelte';
 
-  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
+  let {
+    reportId,
+    locked = false,
+    // Ändert sich nach einem Export, bei dem Positionen als "berichtet"
+    // markiert wurden (siehe ReportDetail.svelte markExportedScope()) - nur
+    // dazu da, den $effect unten erneut auszulösen, kein eigener Sinn.
+    listsVersion = 0,
+    onChanged
+  }: { reportId: string; locked?: boolean; listsVersion?: number; onChanged: () => void } = $props();
 
   const commonUnits = ['Stk', 'm', 'Set', 'Std', 'kg', 'lfm', 'Pkg'];
   const unitByDescription = new Map(STANDARD_MATERIALS.map((entry) => [entry.description, entry.unit]));
@@ -61,6 +70,7 @@
 
   $effect(() => {
     reportId;
+    listsVersion;
     load();
   });
 
@@ -199,6 +209,19 @@
     if (item.source === 'bestellung') parts.push('Bestellt');
     return parts.join(' · ');
   }
+
+  /**
+   * Dezenter Hinweis zum Export-Stand dieser Position (siehe
+   * MaterialItem.reportedQuantity/exportScope.ts) - `undefined`, solange
+   * noch nichts davon berichtet wurde (der weit überwiegende Normalfall,
+   * dafür erscheint bewusst KEIN Hinweis). "berichtet" bei vollständig
+   * abgedeckter Menge, sonst "X von Y bereits berichtet" bei einem Teil-Rest.
+   */
+  function reportedHint(item: MaterialItem): string | undefined {
+    if (!item.reportedQuantity) return undefined;
+    if (isMaterialItemFullyReported(item)) return 'berichtet';
+    return `${item.reportedQuantity} von ${item.quantity} ${item.unit} bereits berichtet`;
+  }
 </script>
 
 <div class="section">
@@ -220,16 +243,20 @@
               {@render materialForm()}
             </li>
           {:else}
-            <li class="row">
+            {@const hint = reportedHint(item)}
+            {@const fullyReported = isMaterialItemFullyReported(item) && !!item.reportedQuantity}
+            <li class="row" class:reported={fullyReported}>
               {#if locked}
                 <div class="row-main">
                   <span class="desc">{item.description}</span>
                   <span class="meta">{formatMeta(item)}</span>
+                  {#if hint}<span class="reported-hint">{hint}</span>{/if}
                 </div>
               {:else}
                 <button type="button" class="row-main" onclick={() => startEdit(item)}>
                   <span class="desc">{item.description}</span>
                   <span class="meta">{formatMeta(item)}</span>
+                  {#if hint}<span class="reported-hint">{hint}</span>{/if}
                 </button>
                 <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>
                   <Icon name="trash" />
@@ -376,6 +403,18 @@
     display: block;
     background: none;
     border: none;
+  }
+
+  /* Dezent gedämpft statt auffällig markiert - vollständig berichtetes
+     Material ist der Normalfall nach einem erfolgten Export, kein
+     Fehlerzustand. */
+  .row.reported {
+    opacity: 0.6;
+  }
+
+  .reported-hint {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
   }
 
   .row-main {
