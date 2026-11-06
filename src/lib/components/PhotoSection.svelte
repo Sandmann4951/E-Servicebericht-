@@ -267,24 +267,20 @@
   .photo-list-header,
   .photo-row {
     display: grid;
-    grid-template-columns: 84px 1fr 40px;
+    grid-template-columns: 84px 1fr 48px;
+    align-items: center;
     gap: var(--space-3);
   }
 
   .photo-list-header {
-    margin-bottom: -4px;
+    margin-bottom: 2px;
   }
 
   .exclude-header {
-    grid-column: 3;
+    grid-column: 2 / 4;
     font-size: 0.85em;
-    line-height: 1.2;
     color: var(--color-text-muted);
-    text-align: center;
-  }
-
-  .photo-row {
-    align-items: center;
+    text-align: right;
   }
 
   .thumb {
