@@ -184,8 +184,19 @@
           <button type="button" class="thumb" onclick={() => openViewer(photo)}>
             <img src={thumbnailUrls[photo.id]} alt="Einsatzfoto" loading="lazy" />
           </button>
-          <label class="note-label">
-            Notiz zu diesem Foto
+          <div class="note-label">
+            <div class="note-label-row">
+              <span>Notiz zu diesem Foto</span>
+              <label class="exclude-label">
+                <input
+                  type="checkbox"
+                  checked={!!photo.excludeFromReport}
+                  disabled={locked}
+                  onchange={() => toggleExcludeFromReport(photo)}
+                />
+                Nicht übernehmen
+              </label>
+            </div>
             <textarea
               rows="2"
               bind:value={noteDrafts[photo.id]}
@@ -193,16 +204,7 @@
               placeholder="Was zeigt dieses Foto?"
               disabled={locked}
             ></textarea>
-            <span class="exclude-label">
-              <input
-                type="checkbox"
-                checked={!!photo.excludeFromReport}
-                disabled={locked}
-                onchange={() => toggleExcludeFromReport(photo)}
-              />
-              Nicht in den Servicebericht übernehmen
-            </span>
-          </label>
+          </div>
         </div>
       {/each}
     </div>
@@ -294,6 +296,13 @@
     color: var(--color-text-muted);
   }
 
+  .note-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
   .note-label textarea {
     width: 100%;
     margin-top: 4px;
@@ -301,12 +310,13 @@
   }
 
   .exclude-label {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: var(--space-2);
+    gap: 4px;
     font-size: 0.85em;
     color: var(--color-text-muted);
+    white-space: nowrap;
   }
 
   .exclude-label input[type='checkbox'] {
