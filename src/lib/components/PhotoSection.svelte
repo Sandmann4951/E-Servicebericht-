@@ -277,8 +277,8 @@
 
   .exclude-header {
     grid-column: 3;
-    font-size: 0.7em;
-    line-height: 1.15;
+    font-size: 0.85em;
+    line-height: 1.2;
     color: var(--color-text-muted);
     text-align: center;
   }
@@ -307,7 +307,7 @@
 
   .note-label {
     min-width: 0;
-    font-size: 0.85em;
+    font-size: 0.95em;
     color: var(--color-text-muted);
   }
 
