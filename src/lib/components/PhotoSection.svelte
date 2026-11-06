@@ -178,25 +178,17 @@
   {:else if photos.length === 0}
     <p class="hint">Noch keine Fotos vorhanden.</p>
   {:else}
+    <div class="photo-list-header">
+      <span class="exclude-header">Nicht übernehmen</span>
+    </div>
     <div class="photo-list">
       {#each photos as photo (photo.id)}
         <div class="photo-row">
           <button type="button" class="thumb" onclick={() => openViewer(photo)}>
             <img src={thumbnailUrls[photo.id]} alt="Einsatzfoto" loading="lazy" />
           </button>
-          <div class="note-label">
-            <div class="note-label-row">
-              <span>Notiz zu diesem Foto</span>
-              <label class="exclude-label">
-                <input
-                  type="checkbox"
-                  checked={!!photo.excludeFromReport}
-                  disabled={locked}
-                  onchange={() => toggleExcludeFromReport(photo)}
-                />
-                Nicht übernehmen
-              </label>
-            </div>
+          <label class="note-label">
+            Notiz zu diesem Foto
             <textarea
               rows="2"
               bind:value={noteDrafts[photo.id]}
@@ -204,7 +196,15 @@
               placeholder="Was zeigt dieses Foto?"
               disabled={locked}
             ></textarea>
-          </div>
+          </label>
+          <input
+            type="checkbox"
+            class="exclude-checkbox"
+            checked={!!photo.excludeFromReport}
+            disabled={locked}
+            onchange={() => toggleExcludeFromReport(photo)}
+            aria-label="Dieses Foto nicht in den Servicebericht übernehmen"
+          />
         </div>
       {/each}
     </div>
@@ -264,14 +264,30 @@
     gap: var(--space-3);
   }
 
+  .photo-list-header,
   .photo-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 84px 1fr 40px;
     gap: var(--space-3);
-    align-items: flex-start;
+  }
+
+  .photo-list-header {
+    margin-bottom: -4px;
+  }
+
+  .exclude-header {
+    grid-column: 3;
+    font-size: 0.7em;
+    line-height: 1.15;
+    color: var(--color-text-muted);
+    text-align: center;
+  }
+
+  .photo-row {
+    align-items: center;
   }
 
   .thumb {
-    flex: 0 0 auto;
     width: 84px;
     height: 84px;
     padding: 0;
@@ -290,17 +306,9 @@
   }
 
   .note-label {
-    flex: 1;
     min-width: 0;
     font-size: 0.85em;
     color: var(--color-text-muted);
-  }
-
-  .note-label-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
   }
 
   .note-label textarea {
@@ -309,18 +317,12 @@
     resize: vertical;
   }
 
-  .exclude-label {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.85em;
-    color: var(--color-text-muted);
-    white-space: nowrap;
-  }
-
-  .exclude-label input[type='checkbox'] {
-    margin: 0;
+  .exclude-checkbox {
+    width: 28px;
+    height: 28px;
+    margin: 0 auto;
+    accent-color: var(--color-primary);
+    cursor: pointer;
   }
 
   .viewer {
