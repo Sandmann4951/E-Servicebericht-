@@ -17,8 +17,9 @@
     updateManualIdleTime
   } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
+  import { listDayProjectPlansInRange, removeDayProjectPlan, setDayProjectPlan } from '../lib/db/dayProjectPlans';
   import { listReports } from '../lib/db/reports';
-  import type { Absence, AbsenceType, ID, ServiceReport } from '../lib/db/types';
+  import type { Absence, AbsenceType, DayProjectPlan, ID, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { formatDurationMinutes, startOfWeekISO, todayISODate } from '../lib/utils/date';
   import { getMonthTarget, type MonthTarget } from '../lib/utils/targetHours';
@@ -154,6 +155,16 @@
   });
   let calendarMode = $state<CalendarMode>('monat');
   let calendarAbsences = $state<Absence[]>([]);
+  // Tagesplanung (welches Projekt ist an einem Kalendertag geplant?) für den
+  // sichtbaren Zeitraum - dasselbe Bereichsabfrage-Muster wie calendarAbsences.
+  let calendarDayProjectPlans = $state<DayProjectPlan[]>([]);
+  // Auswahl-Liste für das Tagesplanung-Dropdown im Tagespanel: alle nicht
+  // gesperrten Berichte (status ist dafür irrelevant, nur `finalizedAt`
+  // entscheidet - ein als "completed" markierter, aber noch nicht final
+  // abgeschlossener Bericht lässt sich z.B. bei einem Gewährleistungs-
+  // Folgeeinsatz weiterhin sinnvoll für einen Tag einplanen). Einmal beim
+  // Betreten der Kalender-Ansicht geladen, nicht pro Tagesauswahl neu.
+  let planSelectableReports = $state<ServiceReport[]>([]);
   // Im Kalender-Tab angetippter Tag: statt (wie früher) sofort in den
   // Tag-Reiter zu springen, bleibt man im Kalender und die Tages-Infos
   // klappen direkt darunter auf. Erneutes Antippen desselben Tages klappt
@@ -478,11 +489,23 @@
     calendarAbsences = await listAbsencesInRange(range.start, range.end);
   }
 
-  // Abwesenheiten für den sichtbaren Kalender-Zeitraum (Monat oder Woche)
-  // nachladen - dieselbe view-Gate-Logik wie oben.
+  async function reloadCalendarDayProjectPlans(): Promise<void> {
+    const range = calendarRange();
+    calendarDayProjectPlans = await listDayProjectPlansInRange(range.start, range.end);
+  }
+
+  // Abwesenheiten + Tagesplanungen für den sichtbaren Kalender-Zeitraum
+  // (Monat oder Woche) nachladen - dieselbe view-Gate-Logik wie oben. Die
+  // Auswahl-Liste für das Tagesplanung-Dropdown wird hier mitgeladen (nicht
+  // range-abhängig, aber praktischerweise an derselben Stelle), damit sie
+  // beim Öffnen eines Tagespanels schon bereitsteht.
   $effect(() => {
     if (view !== 'kalender') return;
     void reloadCalendarAbsences();
+    void reloadCalendarDayProjectPlans();
+    listReports('all').then((all) => {
+      planSelectableReports = all.filter((report) => !report.finalizedAt);
+    });
   });
 
   // Wechselt sich der sichtbare Zeitraum (Monat-/Wochennavigation, Monat-
@@ -730,6 +753,21 @@
       await setAbsence(date, type);
     }
     await reloadCalendarAbsences();
+  }
+
+  /**
+   * Setzt/entfernt das für einen Tag geplante Projekt direkt aus dem
+   * Kalender heraus - leere Auswahl ("Kein Projekt geplant") entfernt die
+   * Planung wieder, genau wie bei quickToggleAbsence() kein extra
+   * Speichern-Button nötig.
+   */
+  async function selectDayProject(date: string, projectNumber: string): Promise<void> {
+    if (!projectNumber) {
+      await removeDayProjectPlan(date);
+    } else {
+      await setDayProjectPlan(date, projectNumber);
+    }
+    await reloadCalendarDayProjectPlans();
   }
 </script>
 
@@ -1191,6 +1229,24 @@
               {/each}
             </div>
             <p class="hint small">Antippen zum Eintragen, erneutes Antippen des aktiven Eintrags entfernt ihn wieder.</p>
+          {/if}
+
+          <label class="day-project-plan">
+            Geplantes Projekt für diesen Tag
+            <select
+              value={calendarDayProjectPlans.find((p) => p.date === date)?.projectNumber ?? ''}
+              onchange={(event) => selectDayProject(date, event.currentTarget.value)}
+            >
+              <option value="">Kein Projekt geplant</option>
+              {#each planSelectableReports as planReport (planReport.id)}
+                <option value={planReport.projectNumber}>
+                  {planReport.projectNumber}{planReport.projectDescription ? ` – ${planReport.projectDescription}` : ''}
+                </option>
+              {/each}
+            </select>
+          </label>
+          {#if date === today}
+            <p class="hint small">Für heute geplant: der Bericht wird in der Übersicht nach oben geschoben und markiert.</p>
           {/if}
         </div>
       {/if}
@@ -2054,6 +2110,22 @@
     background: var(--color-primary);
     border-color: var(--color-primary);
     color: var(--color-primary-contrast);
+  }
+
+  .day-project-plan {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+  }
+
+  .day-project-plan select {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-2);
+    color: var(--color-text);
   }
 
   .legend {

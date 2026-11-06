@@ -6,6 +6,7 @@ import { addMaterialItem } from '../../lib/db/materialItems';
 import { addPhoto } from '../../lib/db/photos';
 import { checkInWorkDay, checkOutWorkDay } from '../../lib/db/workDays';
 import { setAbsence } from '../../lib/db/absences';
+import { setDayProjectPlan } from '../../lib/db/dayProjectPlans';
 import { getAllData } from '../../lib/db/backup';
 import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../../lib/backup/backupFile';
 
@@ -40,7 +41,8 @@ describe('buildBackupFile / parseBackupFile', () => {
       materialItemCount: 1,
       photoCount: 1,
       workDayCount: 0,
-      absenceCount: 0
+      absenceCount: 0,
+      dayProjectPlanCount: 0
     });
     expect(data.reports[0].projectNumber).toBe('2026-001');
     expect(data.reports[0].projectDescription).toBe('Test');
@@ -122,6 +124,49 @@ describe('buildBackupFile / parseBackupFile', () => {
     const restored = await getAllData();
     expect(restored.absences).toHaveLength(1);
     expect(restored.absences[0].date).toBe('2026-08-10');
+  });
+
+  it('sichert und stellt Tagesplanungen (geplantes Projekt pro Kalendertag) im Rundlauf mit wieder her', async () => {
+    await setDayProjectPlan('2026-08-12', '2026-001');
+
+    const blob = await buildBackupFile();
+    const file = new File([blob], 'backup.json', { type: 'application/json' });
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.dayProjectPlanCount).toBe(1);
+    expect(data.dayProjectPlans).toHaveLength(1);
+    expect(data.dayProjectPlans[0]).toMatchObject({ date: '2026-08-12', projectNumber: '2026-001' });
+
+    await resetTestDB();
+    await restoreBackup(data);
+
+    const restored = await getAllData();
+    expect(restored.dayProjectPlans).toHaveLength(1);
+    expect(restored.dayProjectPlans[0].date).toBe('2026-08-12');
+  });
+
+  it('liest eine v3-Sicherungsdatei ohne dayProjectPlans-Feld weiterhin klaglos ein (dayProjectPlans bleibt leer)', async () => {
+    const report = await createReport({ projectNumber: 'ALT-V3' });
+
+    // Simuliert eine v3-Sicherung (vor Einführung der Tagesplanung): kein "dayProjectPlans"-Feld im JSON.
+    const v3Backup = {
+      format: 'e-servicebericht-backup-v3',
+      exportedAt: new Date().toISOString(),
+      reports: (await getAllData()).reports,
+      timeEntries: [],
+      materialItems: [],
+      photos: [],
+      workDays: [],
+      absences: []
+    };
+    const file = new File([JSON.stringify(v3Backup)], 'v3.json', { type: 'application/json' });
+
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.dayProjectPlanCount).toBe(0);
+    expect(data.dayProjectPlans).toEqual([]);
+    expect(data.reports).toHaveLength(1);
+    expect(data.reports[0].projectNumber).toBe(report.projectNumber);
   });
 
   it('liest eine v2-Sicherungsdatei ohne absences-Feld weiterhin klaglos ein (absences bleibt leer)', async () => {

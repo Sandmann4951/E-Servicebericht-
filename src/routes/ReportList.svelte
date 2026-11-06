@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { getDayProjectPlan, getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
   import { importServiceOrderFromFile, ServiceOrderImportError, type ServiceOrderImportPhase } from '../lib/import/importServiceOrder';
   import { getTechnicianName } from '../lib/settings';
+  import { findReportByProjectNumber, pinReports } from '../lib/utils/scheduledProject';
+  import { todayISODate } from '../lib/utils/date';
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
   import Icon from '../lib/components/Icon.svelte';
@@ -44,27 +46,33 @@
   let bulkExportOpen = $state(false);
   /** Der Bericht, in den aktuell eingecheckt ist (falls einer) - wird oben angepinnt und farblich hervorgehoben. */
   let activeReportId = $state<string | undefined>(undefined);
+  /** Projektnummer, die im Kalender für HEUTE geplant ist (siehe db/dayProjectPlans.ts) - für sich allein noch kein Bericht, siehe scheduledTodayReportId unten. */
+  let todayScheduledProjectNumber = $state<string | undefined>(undefined);
 
   // Reine Client-seitige Textsuche über die bereits geladene (nach Status
   // gefilterte) Liste - kein neuer DB-Index nötig, bei der zu erwartenden
   // Berichtsanzahl eines Solo-Handwerkers völlig ausreichend performant.
-  // Der eingecheckte Bericht wird danach zusätzlich an die erste Stelle
-  // gezogen (falls durch Filter/Suche überhaupt noch enthalten) - unabhängig
-  // von der sonst nach `updatedAt` sortierten Reihenfolge soll er immer sofort
-  // sichtbar sein.
   const filteredReports = $derived.by(() => {
     const query = searchQuery.trim().toLowerCase();
-    const base = !query
+    return !query
       ? reports
       : reports.filter(
           (report) =>
             report.projectNumber.toLowerCase().includes(query) || (report.customer ?? '').toLowerCase().includes(query)
         );
-    if (!activeReportId) return base;
-    const activeIndex = base.findIndex((report) => report.id === activeReportId);
-    if (activeIndex <= 0) return base;
-    return [base[activeIndex], ...base.slice(0, activeIndex), ...base.slice(activeIndex + 1)];
   });
+
+  /** Der Bericht, dessen Projektnummer heute im Kalender geplant ist (falls einer existiert) - siehe scheduledProject.ts. */
+  const scheduledTodayReportId = $derived.by(
+    () => findReportByProjectNumber(reports, todayScheduledProjectNumber)?.id
+  );
+
+  // Der eingecheckte Bericht und der heute geplante Bericht werden zusätzlich
+  // an den Anfang gezogen (falls durch Filter/Suche überhaupt noch enthalten)
+  // - unabhängig von der sonst nach `updatedAt` sortierten Reihenfolge sollen
+  // sie immer sofort sichtbar sein. Siehe pinReports() in scheduledProject.ts
+  // für die Priorität (eingecheckt vor heute geplant).
+  const sortedReports = $derived(pinReports(filteredReports, activeReportId, scheduledTodayReportId));
 
   async function loadReports(): Promise<void> {
     loading = true;
@@ -75,6 +83,12 @@
   async function loadActiveReportId(): Promise<void> {
     const entry = await getGloballyActiveTimeEntry();
     activeReportId = entry?.reportId;
+  }
+
+  /** Lädt die Projektnummer, die im Kalender für heute geplant ist (siehe Statistik.svelte Kalender-Tagespanel). */
+  async function loadTodayScheduledProject(): Promise<void> {
+    const plan = await getDayProjectPlan(todayISODate());
+    todayScheduledProjectNumber = plan?.projectNumber;
   }
 
   $effect(() => {
@@ -88,6 +102,7 @@
   // ändert, OHNE dass man diesen Screen verlässt (z.B. "Tag ausstempeln").
   $effect(() => {
     loadActiveReportId();
+    loadTodayScheduledProject();
   });
 
   function newReport(): void {
@@ -431,8 +446,14 @@
       </div>
     {:else}
       <ul class="list">
-        {#each filteredReports as report (report.id)}
-          <li><ReportCard {report} checkedIn={report.id === activeReportId} /></li>
+        {#each sortedReports as report (report.id)}
+          <li>
+            <ReportCard
+              {report}
+              checkedIn={report.id === activeReportId}
+              scheduledToday={report.id === scheduledTodayReportId}
+            />
+          </li>
         {/each}
       </ul>
     {/if}

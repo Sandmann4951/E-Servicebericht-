@@ -295,6 +295,24 @@ export interface Absence {
   updatedAt: ISODateTime;
 }
 
+/**
+ * Das für einen Kalendertag geplante Projekt (Tagesplanung) - genau wie
+ * Absence OHNE eigene uuid: das Datum selbst ist der Primärschlüssel, es
+ * kann nur ein geplantes Projekt pro Tag geben, erneutes Speichern für
+ * denselben Tag überschreibt die vorherige Planung (Upsert statt Duplikat).
+ * `projectNumber` ist bewusst kein Fremdschlüssel (keine `reportId`) - die
+ * Zuordnung zum tatsächlichen Bericht erfolgt rein über den exakten
+ * Projektnummer-Abgleich (siehe utils/scheduledProject.ts), damit eine
+ * Planung auch dann erhalten bleibt, wenn der Bericht später gelöscht und
+ * unter derselben Nummer neu angelegt wird.
+ */
+export interface DayProjectPlan {
+  date: ISODate;
+  projectNumber: string;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
 export interface MaterialItem {
   id: ID;
   reportId: ID;
@@ -392,7 +410,11 @@ export interface ServiceBerichtDB extends DBSchema {
     key: ISODate;
     value: Absence;
   };
+  dayProjectPlans: {
+    key: ISODate;
+    value: DayProjectPlan;
+  };
 }
 
 export const DB_NAME = 'e-servicebericht-db';
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;

@@ -8,3 +8,4 @@ export * from './workDays';
 export * from './stats';
 export * from './backup';
 export * from './absences';
+export * from './dayProjectPlans';

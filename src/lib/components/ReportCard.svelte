@@ -5,7 +5,11 @@
   import { formatDateTimeDE, formatDurationMinutes } from '../utils/date';
   import { navigate } from '../router.svelte';
 
-  let { report, checkedIn = false }: { report: ServiceReport; checkedIn?: boolean } = $props();
+  let {
+    report,
+    checkedIn = false,
+    scheduledToday = false
+  }: { report: ServiceReport; checkedIn?: boolean; scheduledToday?: boolean } = $props();
 
   function open(): void {
     navigate(`/reports/${report.id}`);
@@ -16,12 +20,15 @@
   }
 </script>
 
-<button type="button" class="card" class:checked-in={checkedIn} onclick={open}>
+<button type="button" class="card" class:checked-in={checkedIn} class:scheduled-today={scheduledToday} onclick={open}>
   <div class="row">
     <span class="project">{report.projectNumber || 'Ohne Projektnummer'}</span>
     <div class="badges">
       {#if checkedIn}
         <span class="checked-in-badge"><span class="dot"></span>Eingecheckt</span>
+      {/if}
+      {#if scheduledToday}
+        <span class="scheduled-badge"><Icon name="calendar" size={12} />Heute geplant</span>
       {/if}
       <StatusBadge status={report.status} signed={!!report.signedAt} locked={!!report.finalizedAt} />
       {#if report.finalizedAt && !report.exportedAt}
@@ -68,6 +75,15 @@
     background: var(--color-open-bg);
   }
 
+  /* Eigener, von "Eingecheckt" optisch unterscheidbarer Stil - beide Zustände
+     können gleichzeitig zutreffen (ein heute geplantes Projekt, in das man
+     gerade eingecheckt hat), dann gewinnt das dringendere "Eingecheckt"
+     farblich, der "Heute geplant"-Badge bleibt trotzdem sichtbar (siehe
+     Markup oben). */
+  .card.scheduled-today:not(.checked-in) {
+    border-color: var(--color-primary);
+  }
+
   .row {
     display: flex;
     justify-content: space-between;
@@ -92,6 +108,19 @@
     font-size: 0.75rem;
     font-weight: 700;
     background: var(--color-open);
+    color: var(--color-primary-contrast);
+    white-space: nowrap;
+  }
+
+  .scheduled-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: var(--color-primary);
     color: var(--color-primary-contrast);
     white-space: nowrap;
   }

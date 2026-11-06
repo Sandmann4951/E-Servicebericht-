@@ -2,9 +2,11 @@ import { getAllData, restoreAllData, type AllData } from '../db/backup';
 import type { Photo } from '../db/types';
 
 // v2 fügt den workDays-Store hinzu (Tagesstempeluhr), v3 den absences-Store
-// (Urlaub/Krank/Zeitausgleich). Neue Sicherungen werden immer mit der
-// jeweils neuesten Version geschrieben; ältere Dateien lassen sich weiterhin
-// lesen - fehlende Felder fallen dabei einfach leer aus, kein Fehler.
+// (Urlaub/Krank/Zeitausgleich), v4 den dayProjectPlans-Store (Tagesplanung,
+// welches Projekt an einem Kalendertag geplant ist). Neue Sicherungen werden
+// immer mit der jeweils neuesten Version geschrieben; ältere Dateien lassen
+// sich weiterhin lesen - fehlende Felder fallen dabei einfach leer aus, kein
+// Fehler.
 //
 // Bewusst NICHT ans Rebranding zu "Rivo" angepasst: diese Strings landen als
 // internes Format-Tag in jeder erzeugten Sicherungsdatei. Ändert man sie,
@@ -14,6 +16,7 @@ import type { Photo } from '../db/types';
 const BACKUP_FORMAT_V1 = 'e-servicebericht-backup-v1';
 const BACKUP_FORMAT_V2 = 'e-servicebericht-backup-v2';
 const BACKUP_FORMAT_V3 = 'e-servicebericht-backup-v3';
+const BACKUP_FORMAT_V4 = 'e-servicebericht-backup-v4';
 
 /** Foto-Datensatz mit den Blobs base64-kodiert statt als echte Blobs - JSON-tauglich. */
 type SerializedPhoto = Omit<Photo, 'blob' | 'thumbnailBlob'> & {
@@ -32,6 +35,8 @@ interface BackupFile {
   workDays?: AllData['workDays'];
   /** Erst ab v3 vorhanden - bei v1/v2-Dateien schlicht nicht vorhanden. */
   absences?: AllData['absences'];
+  /** Erst ab v4 vorhanden - bei v1/v2/v3-Dateien schlicht nicht vorhanden. */
+  dayProjectPlans?: AllData['dayProjectPlans'];
 }
 
 /**
@@ -70,14 +75,15 @@ export async function buildBackupFile(): Promise<Blob> {
   );
 
   const backup: BackupFile = {
-    format: BACKUP_FORMAT_V3,
+    format: BACKUP_FORMAT_V4,
     exportedAt: new Date().toISOString(),
     reports: data.reports,
     timeEntries: data.timeEntries,
     materialItems: data.materialItems,
     photos,
     workDays: data.workDays,
-    absences: data.absences
+    absences: data.absences,
+    dayProjectPlans: data.dayProjectPlans
   };
   return new Blob([JSON.stringify(backup)], { type: 'application/json' });
 }
@@ -89,6 +95,7 @@ export interface BackupSummary {
   photoCount: number;
   workDayCount: number;
   absenceCount: number;
+  dayProjectPlanCount: number;
 }
 
 export interface ParsedBackup {
@@ -110,7 +117,10 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
   if (
     typeof json !== 'object' ||
     json === null ||
-    (format !== BACKUP_FORMAT_V1 && format !== BACKUP_FORMAT_V2 && format !== BACKUP_FORMAT_V3) ||
+    (format !== BACKUP_FORMAT_V1 &&
+      format !== BACKUP_FORMAT_V2 &&
+      format !== BACKUP_FORMAT_V3 &&
+      format !== BACKUP_FORMAT_V4) ||
     !Array.isArray((json as Partial<BackupFile>).reports) ||
     !Array.isArray((json as Partial<BackupFile>).timeEntries) ||
     !Array.isArray((json as Partial<BackupFile>).materialItems) ||
@@ -131,10 +141,12 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     timeEntries: backup.timeEntries,
     materialItems: backup.materialItems,
     photos,
-    // v1-Dateien haben keine workDays, v1/v2-Dateien keine absences - dann
-    // bleibt es jeweils leer statt zu scheitern.
+    // v1-Dateien haben keine workDays, v1/v2-Dateien keine absences,
+    // v1/v2/v3-Dateien keine dayProjectPlans - dann bleibt es jeweils leer
+    // statt zu scheitern.
     workDays: backup.workDays ?? [],
-    absences: backup.absences ?? []
+    absences: backup.absences ?? [],
+    dayProjectPlans: backup.dayProjectPlans ?? []
   };
 
   return {
@@ -145,7 +157,8 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
       materialItemCount: data.materialItems.length,
       photoCount: data.photos.length,
       workDayCount: data.workDays.length,
-      absenceCount: data.absences.length
+      absenceCount: data.absences.length,
+      dayProjectPlanCount: data.dayProjectPlans.length
     }
   };
 }

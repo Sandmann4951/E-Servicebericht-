@@ -83,6 +83,11 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
           // den Primärschlüssel-Bereich).
           db.createObjectStore('absences', { keyPath: 'date' });
         }
+        if (oldVersion < 5) {
+          // Tagesplanung (welches Projekt ist an einem Kalendertag geplant?):
+          // genau wie absences ein Store mit dem Datum als Primärschlüssel.
+          db.createObjectStore('dayProjectPlans', { keyPath: 'date' });
+        }
       }
     });
   }
