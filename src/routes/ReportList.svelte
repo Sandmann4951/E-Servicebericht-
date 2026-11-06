@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { getDayProjectPlan, getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
+  import { listDayProjectPlansForDate, getGloballyActiveTimeEntry, listReports, type ReportFilter, type ServiceReport } from '../lib/db';
   import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../lib/backup/backupFile';
   import { importServiceOrderFromFile, ServiceOrderImportError, type ServiceOrderImportPhase } from '../lib/import/importServiceOrder';
   import { getTechnicianName } from '../lib/settings';
-  import { findReportByProjectNumber, pinReports } from '../lib/utils/scheduledProject';
+  import { findReportsByProjectNumbers, pinReports } from '../lib/utils/scheduledProject';
   import { todayISODate } from '../lib/utils/date';
   import DayClock from '../lib/components/DayClock.svelte';
   import ReportCard from '../lib/components/ReportCard.svelte';
@@ -46,8 +46,8 @@
   let bulkExportOpen = $state(false);
   /** Der Bericht, in den aktuell eingecheckt ist (falls einer) - wird oben angepinnt und farblich hervorgehoben. */
   let activeReportId = $state<string | undefined>(undefined);
-  /** Projektnummer, die im Kalender für HEUTE geplant ist (siehe db/dayProjectPlans.ts) - für sich allein noch kein Bericht, siehe scheduledTodayReportId unten. */
-  let todayScheduledProjectNumber = $state<string | undefined>(undefined);
+  /** Projektnummern, die im Kalender für HEUTE geplant sind (siehe db/dayProjectPlans.ts) - für sich allein noch keine Berichte, siehe scheduledTodayReportIds unten. */
+  let todayScheduledProjectNumbers = $state<string[]>([]);
 
   // Reine Client-seitige Textsuche über die bereits geladene (nach Status
   // gefilterte) Liste - kein neuer DB-Index nötig, bei der zu erwartenden
@@ -62,17 +62,17 @@
         );
   });
 
-  /** Der Bericht, dessen Projektnummer heute im Kalender geplant ist (falls einer existiert) - siehe scheduledProject.ts. */
-  const scheduledTodayReportId = $derived.by(
-    () => findReportByProjectNumber(reports, todayScheduledProjectNumber)?.id
+  /** Die Berichte, deren Projektnummer heute im Kalender geplant ist (können mehrere sein) - siehe scheduledProject.ts. */
+  const scheduledTodayReportIds = $derived.by(
+    () => findReportsByProjectNumbers(reports, todayScheduledProjectNumbers).map((report) => report.id)
   );
 
-  // Der eingecheckte Bericht und der heute geplante Bericht werden zusätzlich
-  // an den Anfang gezogen (falls durch Filter/Suche überhaupt noch enthalten)
-  // - unabhängig von der sonst nach `updatedAt` sortierten Reihenfolge sollen
-  // sie immer sofort sichtbar sein. Siehe pinReports() in scheduledProject.ts
-  // für die Priorität (eingecheckt vor heute geplant).
-  const sortedReports = $derived(pinReports(filteredReports, activeReportId, scheduledTodayReportId));
+  // Der eingecheckte Bericht und die heute geplanten Berichte werden
+  // zusätzlich an den Anfang gezogen (falls durch Filter/Suche überhaupt noch
+  // enthalten) - unabhängig von der sonst nach `updatedAt` sortierten
+  // Reihenfolge sollen sie immer sofort sichtbar sein. Siehe pinReports() in
+  // scheduledProject.ts für die Priorität (eingecheckt vor heute geplant).
+  const sortedReports = $derived(pinReports(filteredReports, activeReportId, scheduledTodayReportIds));
 
   async function loadReports(): Promise<void> {
     loading = true;
@@ -85,10 +85,10 @@
     activeReportId = entry?.reportId;
   }
 
-  /** Lädt die Projektnummer, die im Kalender für heute geplant ist (siehe Statistik.svelte Kalender-Tagespanel). */
+  /** Lädt die Projektnummern, die im Kalender für heute geplant sind (siehe Statistik.svelte Kalender-Tagespanel). */
   async function loadTodayScheduledProject(): Promise<void> {
-    const plan = await getDayProjectPlan(todayISODate());
-    todayScheduledProjectNumber = plan?.projectNumber;
+    const plans = await listDayProjectPlansForDate(todayISODate());
+    todayScheduledProjectNumbers = plans.map((plan) => plan.projectNumber);
   }
 
   $effect(() => {
@@ -451,7 +451,7 @@
             <ReportCard
               {report}
               checkedIn={report.id === activeReportId}
-              scheduledToday={report.id === scheduledTodayReportId}
+              scheduledToday={scheduledTodayReportIds.includes(report.id)}
             />
           </li>
         {/each}

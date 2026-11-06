@@ -86,7 +86,36 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
         if (oldVersion < 5) {
           // Tagesplanung (welches Projekt ist an einem Kalendertag geplant?):
           // genau wie absences ein Store mit dem Datum als Primärschlüssel.
+          // (In v6 unten wieder umgebaut, s. dort - Kommentar bewusst stehen
+          // gelassen, damit die Versionsgeschichte nachvollziehbar bleibt.)
           db.createObjectStore('dayProjectPlans', { keyPath: 'date' });
+        }
+        if (oldVersion < 6) {
+          // Mehrere geplante Projekte pro Tag statt nur eines: das Datum kann
+          // nicht mehr der Primärschlüssel sein (IndexedDB erlaubt pro
+          // Schlüssel nur einen Datensatz). Der bestehende Store (keyPath
+          // 'date') wird deshalb komplett ersetzt durch einen Store mit
+          // eigener uuid als Primärschlüssel + Index auf `date` - bereits
+          // vorhandene Tagesplanungen (ein Eintrag pro Tag) werden dabei
+          // 1:1 in das neue Format übernommen (eigene uuid ergänzt), damit
+          // Nutzer mit bestehender Tagesplanung nichts verlieren.
+          // Der Store existiert an dieser Stelle immer schon (entweder aus
+          // einer echten v5-Datenbank, oder gerade erst oben im selben
+          // Upgrade-Durchlauf frisch angelegt, falls mehrere Versionen auf
+          // einmal übersprungen werden) - deshalb hier ohne weitere Prüfung lesen.
+          const oldPlans = await transaction.objectStore('dayProjectPlans').getAll();
+          db.deleteObjectStore('dayProjectPlans');
+          const dayProjectPlans = db.createObjectStore('dayProjectPlans', { keyPath: 'id' });
+          dayProjectPlans.createIndex('date', 'date');
+          for (const plan of oldPlans) {
+            await dayProjectPlans.put({
+              id: crypto.randomUUID(),
+              date: plan.date,
+              projectNumber: plan.projectNumber,
+              createdAt: plan.createdAt,
+              updatedAt: plan.updatedAt
+            });
+          }
         }
       }
     });

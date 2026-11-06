@@ -6,7 +6,7 @@ import { addMaterialItem } from '../../lib/db/materialItems';
 import { addPhoto } from '../../lib/db/photos';
 import { checkInWorkDay, checkOutWorkDay } from '../../lib/db/workDays';
 import { setAbsence } from '../../lib/db/absences';
-import { setDayProjectPlan } from '../../lib/db/dayProjectPlans';
+import { addDayProjectPlan } from '../../lib/db/dayProjectPlans';
 import { getAllData } from '../../lib/db/backup';
 import { buildBackupFile, parseBackupFile, restoreBackup, suggestedBackupFileName } from '../../lib/backup/backupFile';
 
@@ -126,23 +126,61 @@ describe('buildBackupFile / parseBackupFile', () => {
     expect(restored.absences[0].date).toBe('2026-08-10');
   });
 
-  it('sichert und stellt Tagesplanungen (geplantes Projekt pro Kalendertag) im Rundlauf mit wieder her', async () => {
-    await setDayProjectPlan('2026-08-12', '2026-001');
+  it('sichert und stellt Tagesplanungen (geplante Projekte pro Kalendertag, auch mehrere am selben Tag) im Rundlauf mit wieder her', async () => {
+    await addDayProjectPlan('2026-08-12', '2026-001');
+    await addDayProjectPlan('2026-08-12', '2026-002');
 
     const blob = await buildBackupFile();
     const file = new File([blob], 'backup.json', { type: 'application/json' });
     const { data, summary } = await parseBackupFile(file);
 
-    expect(summary.dayProjectPlanCount).toBe(1);
-    expect(data.dayProjectPlans).toHaveLength(1);
-    expect(data.dayProjectPlans[0]).toMatchObject({ date: '2026-08-12', projectNumber: '2026-001' });
+    expect(summary.dayProjectPlanCount).toBe(2);
+    expect(data.dayProjectPlans).toHaveLength(2);
+    expect(data.dayProjectPlans.map((p) => p.projectNumber).sort()).toEqual(['2026-001', '2026-002']);
+    expect(data.dayProjectPlans[0]).toMatchObject({ date: '2026-08-12' });
+    expect(data.dayProjectPlans[0].id).toBeTruthy();
 
     await resetTestDB();
     await restoreBackup(data);
 
     const restored = await getAllData();
+    expect(restored.dayProjectPlans).toHaveLength(2);
+    expect(restored.dayProjectPlans.every((p) => p.date === '2026-08-12')).toBe(true);
+  });
+
+  it('liest eine v4-Sicherungsdatei mit dayProjectPlans OHNE eigene id weiterhin ein (eine id wird nachträglich vergeben)', async () => {
+    const report = await createReport({ projectNumber: 'ALT-V4' });
+
+    // Simuliert eine v4-Sicherung (vor Einführung mehrerer Projekte pro Tag):
+    // dayProjectPlans-Einträge ohne "id"-Feld, das Datum war damals der Schlüssel.
+    const v4Backup = {
+      format: 'e-servicebericht-backup-v4',
+      exportedAt: new Date().toISOString(),
+      reports: (await getAllData()).reports,
+      timeEntries: [],
+      materialItems: [],
+      photos: [],
+      workDays: [],
+      absences: [],
+      dayProjectPlans: [
+        { date: '2026-08-12', projectNumber: 'ALT-V4', createdAt: '2026-08-10T08:00:00.000Z', updatedAt: '2026-08-10T08:00:00.000Z' }
+      ]
+    };
+    const file = new File([JSON.stringify(v4Backup)], 'v4.json', { type: 'application/json' });
+
+    const { data, summary } = await parseBackupFile(file);
+
+    expect(summary.dayProjectPlanCount).toBe(1);
+    expect(data.dayProjectPlans[0].id).toBeTruthy();
+    expect(data.dayProjectPlans[0]).toMatchObject({ date: '2026-08-12', projectNumber: 'ALT-V4' });
+    expect(data.reports).toHaveLength(1);
+    expect(data.reports[0].projectNumber).toBe(report.projectNumber);
+
+    // Muss sich auch ohne Fehler in die DB schreiben lassen (neuer Store hat keyPath 'id').
+    await resetTestDB();
+    await restoreBackup(data);
+    const restored = await getAllData();
     expect(restored.dayProjectPlans).toHaveLength(1);
-    expect(restored.dayProjectPlans[0].date).toBe('2026-08-12');
   });
 
   it('liest eine v3-Sicherungsdatei ohne dayProjectPlans-Feld weiterhin klaglos ein (dayProjectPlans bleibt leer)', async () => {

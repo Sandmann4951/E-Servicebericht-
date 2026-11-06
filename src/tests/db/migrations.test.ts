@@ -5,6 +5,7 @@ import { DB_NAME } from '../../lib/db/types';
 import { getDB } from '../../lib/db/client';
 import { getReport } from '../../lib/db/reports';
 import { listTimeEntries } from '../../lib/db/timeEntries';
+import { listAllDayProjectPlans, listDayProjectPlansForDate } from '../../lib/db/dayProjectPlans';
 
 beforeEach(async () => {
   await resetTestDB();
@@ -127,5 +128,84 @@ describe('v2 -> v3 Migration: Zeitspannen über Mitternacht nachrechnen', () => 
     expect(entry?.durationMinutes).toBe(270);
     const report = await getReport(reportId);
     expect(report?.totalDurationMinutes).toBe(270);
+  });
+});
+
+describe('v5 -> v6 Migration: dayProjectPlans von "ein Eintrag pro Tag" (keyPath date) auf "mehrere Einträge pro Tag" (keyPath id)', () => {
+  it('übernimmt bereits vorhandene Tagesplanungen unverändert inhaltlich in das neue Format', async () => {
+    const now = new Date().toISOString();
+
+    // Simuliert eine bestehende v5-Datenbank: dayProjectPlans mit dem Datum
+    // selbst als Primärschlüssel, genau ein Eintrag pro Tag.
+    const setupDb = await openDB(DB_NAME, 5, {
+      upgrade(db) {
+        const reports = db.createObjectStore('reports', { keyPath: 'id' });
+        reports.createIndex('projectNumber', 'projectNumber');
+        reports.createIndex('status', 'status');
+        reports.createIndex('updatedAt', 'updatedAt');
+
+        const timeEntries = db.createObjectStore('timeEntries', { keyPath: 'id' });
+        timeEntries.createIndex('reportId', 'reportId');
+        timeEntries.createIndex('date', 'date');
+        timeEntries.createIndex('workDayId', 'workDayId');
+
+        db.createObjectStore('materialItems', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+        db.createObjectStore('photos', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+
+        const workDays = db.createObjectStore('workDays', { keyPath: 'id' });
+        workDays.createIndex('date', 'date');
+
+        db.createObjectStore('absences', { keyPath: 'date' });
+        db.createObjectStore('dayProjectPlans', { keyPath: 'date' });
+      }
+    });
+
+    await setupDb.put('dayProjectPlans', {
+      date: '2026-08-11',
+      projectNumber: '2026-001',
+      createdAt: now,
+      updatedAt: now
+    });
+    setupDb.close();
+
+    // Die App öffnet die DB regulär - das triggert die v5->v6-Migration.
+    await getDB();
+
+    const plans = await listDayProjectPlansForDate('2026-08-11');
+    expect(plans).toHaveLength(1);
+    expect(plans[0].id).toBeTruthy();
+    expect(plans[0]).toMatchObject({ date: '2026-08-11', projectNumber: '2026-001', createdAt: now, updatedAt: now });
+
+    expect(await listAllDayProjectPlans()).toHaveLength(1);
+  });
+
+  it('lässt eine Datenbank ohne jemals gespeicherte Tagesplanung unverändert (leere Liste)', async () => {
+    const setupDb = await openDB(DB_NAME, 5, {
+      upgrade(db) {
+        const reports = db.createObjectStore('reports', { keyPath: 'id' });
+        reports.createIndex('projectNumber', 'projectNumber');
+        reports.createIndex('status', 'status');
+        reports.createIndex('updatedAt', 'updatedAt');
+
+        const timeEntries = db.createObjectStore('timeEntries', { keyPath: 'id' });
+        timeEntries.createIndex('reportId', 'reportId');
+        timeEntries.createIndex('date', 'date');
+        timeEntries.createIndex('workDayId', 'workDayId');
+
+        db.createObjectStore('materialItems', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+        db.createObjectStore('photos', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+
+        const workDays = db.createObjectStore('workDays', { keyPath: 'id' });
+        workDays.createIndex('date', 'date');
+
+        db.createObjectStore('absences', { keyPath: 'date' });
+        db.createObjectStore('dayProjectPlans', { keyPath: 'date' });
+      }
+    });
+    setupDb.close();
+
+    await getDB();
+
+    expect(await listAllDayProjectPlans()).toEqual([]);
   });
 });

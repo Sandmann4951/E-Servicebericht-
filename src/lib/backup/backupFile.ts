@@ -146,7 +146,13 @@ export async function parseBackupFile(file: File | Blob): Promise<ParsedBackup> 
     // statt zu scheitern.
     workDays: backup.workDays ?? [],
     absences: backup.absences ?? [],
-    dayProjectPlans: backup.dayProjectPlans ?? []
+    // v4-Dateien haben dayProjectPlans noch ohne eigene `id` (damals ein
+    // Eintrag pro Tag, das Datum selbst war der Schlüssel - seit der
+    // Mehrfachplanung pro Tag braucht jeder Eintrag eine eigene id, siehe
+    // DayProjectPlan in db/types.ts). Fehlt sie, wird hier beim Einlesen
+    // einmalig eine neue vergeben, die alte Planung bleibt dabei inhaltlich
+    // unverändert erhalten.
+    dayProjectPlans: (backup.dayProjectPlans ?? []).map((plan) => ({ ...plan, id: plan.id ?? crypto.randomUUID() }))
   };
 
   return {

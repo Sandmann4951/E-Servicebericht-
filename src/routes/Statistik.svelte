@@ -17,7 +17,7 @@
     updateManualIdleTime
   } from '../lib/clockActions';
   import { listAbsencesInRange, removeAbsence, setAbsence } from '../lib/db/absences';
-  import { listDayProjectPlansInRange, removeDayProjectPlan, setDayProjectPlan } from '../lib/db/dayProjectPlans';
+  import { addDayProjectPlan, listDayProjectPlansInRange, removeDayProjectPlan } from '../lib/db/dayProjectPlans';
   import { listReports } from '../lib/db/reports';
   import type { Absence, AbsenceType, DayProjectPlan, ID, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
@@ -755,18 +755,32 @@
     await reloadCalendarAbsences();
   }
 
+  /** Alle für `date` bereits geplanten Projekte (aus dem für den sichtbaren Zeitraum geladenen calendarDayProjectPlans). */
+  function plansForDate(date: string): DayProjectPlan[] {
+    return calendarDayProjectPlans.filter((plan) => plan.date === date);
+  }
+
+  /** Noch nicht für `date` geplante, auswählbare Berichte (für das "Projekt hinzufügen"-Dropdown). */
+  function availablePlanReportsForDate(date: string): ServiceReport[] {
+    const plannedNumbers = new Set(plansForDate(date).map((plan) => plan.projectNumber));
+    return planSelectableReports.filter((report) => !plannedNumbers.has(report.projectNumber));
+  }
+
   /**
-   * Setzt/entfernt das für einen Tag geplante Projekt direkt aus dem
-   * Kalender heraus - leere Auswahl ("Kein Projekt geplant") entfernt die
-   * Planung wieder, genau wie bei quickToggleAbsence() kein extra
-   * Speichern-Button nötig.
+   * Fügt ein weiteres geplantes Projekt für einen Tag hinzu - mehrere
+   * Projekte pro Tag sind möglich (siehe db/dayProjectPlans.ts), deshalb
+   * kein Ersetzen/Upsert mehr, sondern ein echtes Hinzufügen. Direktes
+   * Speichern ohne extra Button, wie bei quickToggleAbsence().
    */
-  async function selectDayProject(date: string, projectNumber: string): Promise<void> {
-    if (!projectNumber) {
-      await removeDayProjectPlan(date);
-    } else {
-      await setDayProjectPlan(date, projectNumber);
-    }
+  async function addDayProject(date: string, projectNumber: string): Promise<void> {
+    if (!projectNumber) return;
+    await addDayProjectPlan(date, projectNumber);
+    await reloadCalendarDayProjectPlans();
+  }
+
+  /** Entfernt eine einzelne geplante Projekt-Zuordnung (per id) wieder aus dem Tag. */
+  async function removeDayProject(id: ID): Promise<void> {
+    await removeDayProjectPlan(id);
     await reloadCalendarDayProjectPlans();
   }
 </script>
@@ -1231,22 +1245,49 @@
             <p class="hint small">Antippen zum Eintragen, erneutes Antippen des aktiven Eintrags entfernt ihn wieder.</p>
           {/if}
 
-          <label class="day-project-plan">
-            Geplantes Projekt für diesen Tag
-            <select
-              value={calendarDayProjectPlans.find((p) => p.date === date)?.projectNumber ?? ''}
-              onchange={(event) => selectDayProject(date, event.currentTarget.value)}
-            >
-              <option value="">Kein Projekt geplant</option>
-              {#each planSelectableReports as planReport (planReport.id)}
-                <option value={planReport.projectNumber}>
-                  {planReport.projectNumber}{planReport.projectDescription ? ` – ${planReport.projectDescription}` : ''}
-                </option>
-              {/each}
-            </select>
-          </label>
-          {#if date === today}
-            <p class="hint small">Für heute geplant: der Bericht wird in der Übersicht nach oben geschoben und markiert.</p>
+          <div class="day-project-plan">
+            <span class="day-project-plan-label">Geplante Projekte für diesen Tag</span>
+            {#if plansForDate(date).length > 0}
+              <ul class="day-project-plan-chips">
+                {#each plansForDate(date) as plan (plan.id)}
+                  <li class="day-project-plan-chip">
+                    <span>{plan.projectNumber}</span>
+                    <button
+                      type="button"
+                      onclick={() => removeDayProject(plan.id)}
+                      aria-label={`Planung für ${plan.projectNumber} entfernen`}
+                    >
+                      <Icon name="close" size={12} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if availablePlanReportsForDate(date).length > 0}
+              <select
+                value=""
+                onchange={(event) => {
+                  const value = event.currentTarget.value;
+                  event.currentTarget.value = '';
+                  if (value) void addDayProject(date, value);
+                }}
+              >
+                <option value="" disabled selected>Projekt hinzufügen…</option>
+                {#each availablePlanReportsForDate(date) as planReport (planReport.id)}
+                  <option value={planReport.projectNumber}>
+                    {planReport.projectNumber}{planReport.projectDescription ? ` – ${planReport.projectDescription}` : ''}
+                  </option>
+                {/each}
+              </select>
+            {:else if plansForDate(date).length === 0}
+              <p class="hint small">Keine Berichte zum Planen verfügbar.</p>
+            {/if}
+          </div>
+          {#if date === today && plansForDate(date).length > 0}
+            <p class="hint small">
+              {plansForDate(date).length === 1 ? 'Heute geplant: der Bericht wird' : 'Heute geplant: die Berichte werden'}
+              in der Übersicht nach oben geschoben und markiert.
+            </p>
           {/if}
         </div>
       {/if}
@@ -2115,7 +2156,12 @@
   .day-project-plan {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-2);
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+  }
+
+  .day-project-plan-label {
     font-size: 0.82rem;
     color: var(--color-text-muted);
   }
@@ -2126,6 +2172,37 @@
     border-radius: var(--radius-md);
     padding: var(--space-2);
     color: var(--color-text);
+  }
+
+  .day-project-plan-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .day-project-plan-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    padding: 4px 6px 4px 10px;
+    font-size: 0.82rem;
+    color: var(--color-text);
+  }
+
+  .day-project-plan-chip button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    min-height: auto;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--color-surface-muted);
+    color: var(--color-text-muted);
   }
 
   .legend {
