@@ -267,7 +267,7 @@
   .photo-list-header,
   .photo-row {
     display: grid;
-    grid-template-columns: 84px 1fr 48px;
+    grid-template-columns: 84px 1fr 72px;
     align-items: center;
     gap: var(--space-3);
   }
@@ -277,10 +277,11 @@
   }
 
   .exclude-header {
-    grid-column: 2 / 4;
+    grid-column: 3;
     font-size: 0.85em;
+    line-height: 1.2;
     color: var(--color-text-muted);
-    text-align: right;
+    text-align: center;
   }
 
   .thumb {
