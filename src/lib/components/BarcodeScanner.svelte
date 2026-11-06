@@ -13,6 +13,15 @@
    *   einen ganzen Lieferschein mit MEHREREN Artikelpositionen statt nur
    *   einem einzelnen Etikett - siehe onDeliveryNoteText.
    *
+   * In "Etikett-Text" und "Lieferschein" gibt es neben "📸 Foto aufnehmen"
+   * (Standbild aus der Live-Vorschau) zusätzlich "Foto aus Kamera-App/
+   * Galerie wählen" (`<input type="file">`, gleiches Muster wie in
+   * PhotoSection.svelte) - echter Kamera-Autofokus ist über die
+   * getUserMedia-Live-Vorschau im Browser nicht zuverlässig erzwingbar
+   * (besonders auf iOS Safari), die native Kamera-App dahinter liefert
+   * dagegen deutlich schärfere Fotos. Beide Wege münden in derselben
+   * Texterkennung, siehe recognizeText().
+   *
    * Beide nachgeladenen Bibliotheken (`jsQR`, `tesseract.js`) werden bewusst
    * erst beim tatsächlichen Öffnen des Scanners bzw. Umschalten in den
    * Etikett-Text-Modus per dynamischem Import nachgeladen (gleiches Muster
@@ -116,7 +125,23 @@
       // jsQR exportiert seine Decode-Funktion als default-Export.
       const jsQRModule = await import('jsqr');
       decodeQR = jsQRModule.default;
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      // Höhere Zielauflösung + `focusMode: 'continuous'` (wo unterstützt,
+      // z.B. Android/Chrome) sollen den Autofokus der Live-Vorschau
+      // verbessern - auf Geräten/Browsern ohne Unterstützung (u.a.
+      // vermutlich iOS Safari) ignoriert die Engine diese "ideal"-Werte
+      // einfach, schadet also nicht. Kein Allheilmittel: echter Autofokus
+      // ist über getUserMedia nicht zuverlässig erzwingbar - deshalb gibt
+      // es zusätzlich den "Foto auswählen"-Weg unten (nutzt die native
+      // Kamera-App mit echtem Autofokus statt nur der Video-Vorschau).
+      const videoConstraints: MediaTrackConstraints & {
+        advanced?: (MediaTrackConstraintSet & { focusMode?: string })[];
+      } = {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' }]
+      };
+      stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
       if (!videoEl) return; // Komponente wurde inzwischen geschlossen
       videoEl.srcObject = stream;
       await videoEl.play();
@@ -138,46 +163,118 @@
     onScan(text);
   }
 
+  let fileInput: HTMLInputElement | undefined;
+
   /**
-   * Nimmt das aktuelle Kamerabild als Standbild auf und erkennt den
-   * gedruckten Text darauf per `tesseract.js` (deutsches Sprachmodell,
-   * LSTM-Engine - passend zur selbst gehosteten Kernbibliothek unter
-   * public/tesseract/). Läuft im Hintergrund einige Sekunden, daher der
-   * `ocrRunning`-Ladezustand.
+   * Erkennt den gedruckten Text eines Bildes per `tesseract.js` (deutsches
+   * Sprachmodell, LSTM-Engine - passend zur selbst gehosteten
+   * Kernbibliothek unter public/tesseract/). Gemeinsame Grundlage für
+   * sowohl den Video-Standbild-Weg (capturePhoto()) als auch ein über
+   * "Foto auswählen" gewähltes Bild (handleFileSelected()) - dieselbe
+   * Erkennung, egal woher das Bild kommt.
+   *
+   * Zeichnet das Bild dabei bewusst um Faktor 1.5 hochskaliert (analog zur
+   * 2x-Skalierung bei der PDF-OCR, siehe serviceOrderPdf.ts
+   * extractPdfTextViaOcr()) und mit leicht angehobenem Kontrast/Helligkeit
+   * (`ctx.filter`) - verbessert die Trefferquote bei leicht
+   * unscharfen/kontrastarmen Fotos spürbar, ist aber kein Allheilmittel
+   * gegen starke Unschärfe (dagegen hilft nur ein tatsächlich scharfes
+   * Ausgangsbild, siehe "Foto auswählen"-Weg unten).
    */
+  async function recognizeText(
+    source: CanvasImageSource,
+    naturalWidth: number,
+    naturalHeight: number
+  ): Promise<string> {
+    const scale = 1.5;
+    const captureCanvas = document.createElement('canvas');
+    captureCanvas.width = Math.round(naturalWidth * scale);
+    captureCanvas.height = Math.round(naturalHeight * scale);
+    const captureCtx = captureCanvas.getContext('2d');
+    if (!captureCtx) throw new Error('Kein Canvas-Kontext');
+    captureCtx.filter = 'contrast(1.25) brightness(1.05)';
+    captureCtx.drawImage(source, 0, 0, captureCanvas.width, captureCanvas.height);
+
+    const { createWorker } = await import('tesseract.js');
+    const base = import.meta.env.BASE_URL;
+    const worker = await createWorker('deu', 1, {
+      workerPath: `${base}tesseract/worker.min.js`,
+      corePath: `${base}tesseract/tesseract-core-lstm.wasm.js`,
+      langPath: `${base}tessdata`,
+      gzip: true
+    });
+    try {
+      const {
+        data: { text }
+      } = await worker.recognize(captureCanvas);
+      return text;
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  /** Reicht das erkannte Ergebnis je nach Modus an den passenden Callback weiter - gemeinsam für Video-Capture und Datei-Auswahl. */
+  function deliverOcrText(text: string): void {
+    if (mode === 'delivery') {
+      onDeliveryNoteText(text);
+    } else {
+      onOcrText(text);
+    }
+  }
+
+  /** Nimmt das aktuelle Kamerabild als Standbild auf und erkennt den gedruckten Text darauf. Läuft im Hintergrund einige Sekunden, daher der `ocrRunning`-Ladezustand. */
   async function capturePhoto(): Promise<void> {
     if (!videoEl || ocrRunning) return;
     ocrRunning = true;
     ocrError = undefined;
     try {
-      const captureCanvas = document.createElement('canvas');
-      captureCanvas.width = videoEl.videoWidth;
-      captureCanvas.height = videoEl.videoHeight;
-      const captureCtx = captureCanvas.getContext('2d');
-      if (!captureCtx) throw new Error('Kein Canvas-Kontext');
-      captureCtx.drawImage(videoEl, 0, 0, captureCanvas.width, captureCanvas.height);
+      const text = await recognizeText(videoEl, videoEl.videoWidth, videoEl.videoHeight);
+      stopCamera();
+      deliverOcrText(text);
+    } catch {
+      ocrError = 'Texterkennung fehlgeschlagen - nochmal versuchen oder den Text unten manuell eingeben.';
+    } finally {
+      ocrRunning = false;
+    }
+  }
 
-      const { createWorker } = await import('tesseract.js');
-      const base = import.meta.env.BASE_URL;
-      const worker = await createWorker('deu', 1, {
-        workerPath: `${base}tesseract/worker.min.js`,
-        corePath: `${base}tesseract/tesseract-core-lstm.wasm.js`,
-        langPath: `${base}tessdata`,
-        gzip: true
-      });
-      try {
-        const {
-          data: { text }
-        } = await worker.recognize(captureCanvas);
-        stopCamera();
-        if (mode === 'delivery') {
-          onDeliveryNoteText(text);
-        } else {
-          onOcrText(text);
-        }
-      } finally {
-        await worker.terminate();
-      }
+  function loadImageFile(file: File): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Bild konnte nicht geladen werden'));
+      };
+      img.src = url;
+    });
+  }
+
+  /**
+   * Alternative zum Live-Video-Standbild: öffnet den normalen Datei-/
+   * Kamera-Dialog des Geräts (gleiches `<input type="file">`-Muster wie in
+   * PhotoSection.svelte). Ein darüber aufgenommenes Foto durchläuft die
+   * NATIVE Kamera-App des Handys mit echtem Autofokus/Belichtungsautomatik
+   * - das liefert deutlich schärfere Bilder als der per getUserMedia aus
+   * der Live-Vorschau gegriffene Frame, dessen Autofokus im Browser nicht
+   * zuverlässig steuerbar ist (besonders auf iOS Safari). Ebenso nutzbar,
+   * um ein bereits vorhandenes (schon scharfes) Foto aus der Galerie zu
+   * wählen, statt neu zu fotografieren.
+   */
+  async function handleFileSelected(fileList: FileList | null): Promise<void> {
+    const file = fileList?.[0];
+    if (!file || ocrRunning) return;
+    ocrRunning = true;
+    ocrError = undefined;
+    try {
+      const img = await loadImageFile(file);
+      const text = await recognizeText(img, img.naturalWidth, img.naturalHeight);
+      stopCamera();
+      deliverOcrText(text);
     } catch {
       ocrError = 'Texterkennung fehlgeschlagen - nochmal versuchen oder den Text unten manuell eingeben.';
     } finally {
@@ -221,9 +318,28 @@
     {#if mode === 'photo' || mode === 'delivery'}
       <div class="capture-area">
         <button type="button" class="capture" onclick={capturePhoto} disabled={ocrRunning}>📸 Foto aufnehmen</button>
+        <button type="button" class="pick-file" onclick={() => fileInput?.click()} disabled={ocrRunning}>
+          Foto aus Kamera-App/Galerie wählen
+        </button>
+        <p class="capture-tip">
+          Für beste Ergebnisse: Handy kurz stillhalten, bis das Bild scharf ist - oder ein bereits aufgenommenes,
+          scharfes Foto auswählen.
+        </p>
       </div>
     {/if}
   {/if}
+
+  <input
+    bind:this={fileInput}
+    type="file"
+    accept="image/*"
+    capture="environment"
+    class="visually-hidden"
+    onchange={(event) => {
+      void handleFileSelected(event.currentTarget.files);
+      event.currentTarget.value = '';
+    }}
+  />
 
   <div class="manual-area">
     {#if manualMode}
@@ -363,6 +479,28 @@
 
   .capture:disabled {
     opacity: 0.5;
+  }
+
+  .pick-file {
+    width: 100%;
+    margin-top: var(--space-2);
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    font-size: 0.85rem;
+  }
+
+  .pick-file:disabled {
+    opacity: 0.5;
+  }
+
+  .capture-tip {
+    margin: var(--space-2) 0 0;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
   }
 
   .manual-area {
