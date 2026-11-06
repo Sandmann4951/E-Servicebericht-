@@ -337,6 +337,40 @@ describe('buildReportDocx', () => {
     expect(xml).not.toContain('10.08.2026');
   });
 
+  it('nimmt per excludeFromReport ausgeschlossene Fotos nicht in die Dokumentations-Tabelle auf', async () => {
+    const blob = await build(
+      fakeFullReport({
+        photos: [
+          fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: 'Sicherung vor dem Austausch' }),
+          fakePhoto({ id: 'p2', takenAt: '2026-08-10T10:30:00.000Z', note: 'Nur für intern', excludeFromReport: true })
+        ]
+      })
+    );
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith('word/media/photo'));
+    // Nur das nicht ausgeschlossene Foto wird eingebettet.
+    expect(mediaFiles).toHaveLength(1);
+
+    const xml = await zip.file('word/document.xml')!.async('text');
+    expect(xml).toContain('Sicherung vor dem Austausch');
+    expect(xml).not.toContain('Nur für intern');
+    // Die restlichen 9 Dokumentations-Zeilen (10 - 1 eingebettetes Foto) behalten das Platzhalterbild.
+    expect(xml.match(/r:embed="rId22"/g)?.length).toBe(9);
+  });
+
+  it('exportiert ganz normal, wenn alle Fotos ausgeschlossen sind (keine Bilder, Platzhalter bleiben überall)', async () => {
+    const blob = await build(
+      fakeFullReport({
+        photos: [fakePhoto({ id: 'p1', excludeFromReport: true })]
+      })
+    );
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith('word/media/photo'));
+    expect(mediaFiles).toHaveLength(0);
+    const xml = await zip.file('word/document.xml')!.async('text');
+    expect(xml.match(/r:embed="rId22"/g)?.length).toBe(10);
+  });
+
   describe('weitere ELSA-Vorlagenfelder (Objektadresse, E-Mail, Bestellnummer, Mehrungen, Mängel, Angebot, Status-Auswahlen)', () => {
     it('befüllt Objektadresse/Einsatzort, E-Mail und Bestellnummer/AB', async () => {
       const blob = await build(

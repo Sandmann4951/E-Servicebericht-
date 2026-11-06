@@ -48,8 +48,11 @@ export async function addPhoto(reportId: ID, input: PhotoInput): Promise<Photo> 
   return photo;
 }
 
-/** Aktualisiert bislang nur `note` (eigene Notiz zu genau diesem Foto) - bei Bedarf um weitere Felder erweiterbar. */
-export async function updatePhoto(id: ID, patch: { note?: string }): Promise<Photo | undefined> {
+/** Aktualisiert `note` (eigene Notiz zu genau diesem Foto) und/oder `excludeFromReport` (Ausschluss aus dem Word-Export). */
+export async function updatePhoto(
+  id: ID,
+  patch: { note?: string; excludeFromReport?: boolean }
+): Promise<Photo | undefined> {
   const db = await getDB();
   const tx = db.transaction(ALL_STORES, 'readwrite');
   const store = tx.objectStore('photos');
@@ -60,6 +63,7 @@ export async function updatePhoto(id: ID, patch: { note?: string }): Promise<Pho
   }
 
   if (patch.note !== undefined) photo.note = patch.note.trim() || undefined;
+  if (patch.excludeFromReport !== undefined) photo.excludeFromReport = patch.excludeFromReport || undefined;
 
   await store.put(photo);
   await recomputeReportSummary(tx, photo.reportId);

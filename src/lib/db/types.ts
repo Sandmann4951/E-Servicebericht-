@@ -352,6 +352,14 @@ export interface Photo {
    * docxExport.ts).
    */
   note?: string;
+  /**
+   * Wenn true: dieses Foto NICHT in den exportierten Word-Servicebericht
+   * übernehmen (z.B. ein Foto nur zur eigenen Dokumentation/Erinnerung).
+   * Bleibt dabei ganz normal im Fotos-Tab der App sichtbar/erhalten - wirkt
+   * sich nur auf buildReportDocx() aus (docxExport.ts). `undefined`/`false`
+   * = wie bisher ganz normal mit exportieren.
+   */
+  excludeFromReport?: boolean;
 }
 
 export interface ServiceBerichtDB extends DBSchema {

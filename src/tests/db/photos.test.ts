@@ -57,3 +57,28 @@ describe('photos repository - note (eigene Notiz pro Foto)', () => {
     expect(result).toBeUndefined();
   });
 });
+
+describe('photos repository - excludeFromReport (Ausschluss aus dem Word-Export)', () => {
+  it('ist standardmäßig nicht gesetzt (Foto wird normal exportiert)', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const photo = await addPhoto(report.id, { blob: fakeBlob(), thumbnailBlob: fakeBlob(), mimeType: 'image/jpeg', sizeBytes: 4 });
+    expect(photo.excludeFromReport).toBeUndefined();
+  });
+
+  it('kann gesetzt und wieder zurückgesetzt werden, ohne die Notiz oder andere Fotos zu beeinflussen', async () => {
+    const report = await createReport({ projectNumber: 'A' });
+    const photoA = await addPhoto(report.id, { blob: fakeBlob(), thumbnailBlob: fakeBlob(), mimeType: 'image/jpeg', sizeBytes: 4 });
+    const photoB = await addPhoto(report.id, { blob: fakeBlob(), thumbnailBlob: fakeBlob(), mimeType: 'image/jpeg', sizeBytes: 4 });
+    await updatePhoto(photoA.id, { note: 'Sicherung vor dem Austausch' });
+
+    const excluded = await updatePhoto(photoA.id, { excludeFromReport: true });
+    expect(excluded?.excludeFromReport).toBe(true);
+    expect(excluded?.note).toBe('Sicherung vor dem Austausch');
+
+    const reloadedB = await getPhoto(photoB.id);
+    expect(reloadedB?.excludeFromReport).toBeUndefined();
+
+    const included = await updatePhoto(photoA.id, { excludeFromReport: false });
+    expect(included?.excludeFromReport).toBeUndefined();
+  });
+});

@@ -64,6 +64,13 @@
     photos = photos.map((photo) => (photo.id === photoId ? updated : photo));
   }
 
+  /** Foto bleibt im Tab erhalten - wirkt sich nur auf den nächsten Word-Export aus (siehe docxExport.ts). */
+  async function toggleExcludeFromReport(photo: Photo): Promise<void> {
+    const updated = await updatePhoto(photo.id, { excludeFromReport: !photo.excludeFromReport });
+    if (!updated) return;
+    photos = photos.map((p) => (p.id === photo.id ? updated : p));
+  }
+
   $effect(() => {
     reportId;
     load();
@@ -186,6 +193,15 @@
               placeholder="Was zeigt dieses Foto?"
               disabled={locked}
             ></textarea>
+            <span class="exclude-label">
+              <input
+                type="checkbox"
+                checked={!!photo.excludeFromReport}
+                disabled={locked}
+                onchange={() => toggleExcludeFromReport(photo)}
+              />
+              Nicht in den Servicebericht übernehmen
+            </span>
           </label>
         </div>
       {/each}
@@ -282,6 +298,19 @@
     width: 100%;
     margin-top: 4px;
     resize: vertical;
+  }
+
+  .exclude-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--space-2);
+    font-size: 0.85em;
+    color: var(--color-text-muted);
+  }
+
+  .exclude-label input[type='checkbox'] {
+    margin: 0;
   }
 
   .viewer {

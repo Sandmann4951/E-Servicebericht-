@@ -443,14 +443,20 @@ async function injectSignature(zip: PizZip, report: ServiceReport): Promise<void
  * (Browser) bleibt der Parameter immer weg, dann greift der echte `fetch()`.
  */
 export async function buildReportDocx(data: FullReport, templateBytes?: ArrayBuffer): Promise<Blob> {
+  // Vom Nutzer per Checkbox ausgeschlossene Fotos (Photo.excludeFromReport)
+  // fließen weder in die Dokumentations-Tabelle noch in deren Beschreibung
+  // ein - sie bleiben dafür im Fotos-Tab der App ganz normal erhalten, diese
+  // Filterung betrifft nur die hier erzeugte Export-Kopie der Daten.
+  const exportData: FullReport = { ...data, photos: data.photos.filter((photo) => !photo.excludeFromReport) };
+
   const templateBuffer: ArrayBuffer = templateBytes ?? (await fetch(templateUrl).then((res) => res.arrayBuffer()));
   const zip = new PizZip(templateBuffer);
   const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-  await doc.renderAsync(buildTemplateData(data));
+  await doc.renderAsync(buildTemplateData(exportData));
 
   const outZip = doc.getZip();
-  await injectPhotos(outZip, data.photos.slice(0, MAX_PHOTOS));
-  await injectSignature(outZip, data.report);
+  await injectPhotos(outZip, exportData.photos.slice(0, MAX_PHOTOS));
+  await injectSignature(outZip, exportData.report);
 
   return outZip.generate({ type: 'blob', mimeType: DOCX_MIME_TYPE });
 }
