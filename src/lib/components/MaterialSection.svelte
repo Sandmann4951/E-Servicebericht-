@@ -4,6 +4,7 @@
   import { STANDARD_MATERIALS } from '../materialCatalog';
   import { parseScannedMaterialLabel } from '../utils/materialScan';
   import { parseLabelText } from '../utils/labelOcr';
+  import { parseDeliveryNoteText } from '../utils/deliveryNoteOcr';
   import { isMaterialItemFullyReported } from '../export/exportScope';
   import Icon from './Icon.svelte';
   import BarcodeScanner from './BarcodeScanner.svelte';
@@ -58,6 +59,25 @@
   // parseScannedMaterialLabel()) leicht vom Etikett abgetippt werden kann.
   let lastScanRaw = $state<string | undefined>();
 
+  /**
+   * Review-Liste nach einem Lieferschein-Scan (siehe handleDeliveryNoteResult())
+   * - anders als beim Einzel-Etikett-Scan werden hier MEHRERE Positionen auf
+   * einmal vorgeschlagen, jede einzeln an-/abwählbar und editierbar, bevor sie
+   * übernommen werden (OCR ist fehleranfällig, erst recht bei mehreren
+   * Positionen auf einmal).
+   */
+  interface DeliveryReviewItem {
+    id: string;
+    selected: boolean;
+    articleNumber: string;
+    description: string;
+    quantity: string;
+  }
+  let deliveryReviewItems = $state<DeliveryReviewItem[]>([]);
+  // true, wenn ein Lieferschein-Scan durchgeführt wurde, dabei aber gar keine
+  // Position erkannt wurde - eigener Hinweis statt eines leeren Review-Panels.
+  let deliveryNoteEmpty = $state(false);
+
   async function load(): Promise<void> {
     loading = true;
     items = await listMaterialItems(reportId);
@@ -86,6 +106,8 @@
     showForm = false;
     unitTouched = false;
     lastScanRaw = undefined;
+    deliveryReviewItems = [];
+    deliveryNoteEmpty = false;
   }
 
   function startAdd(): void {
@@ -148,6 +170,55 @@
     if (parsed.quantity !== undefined) formQuantity = String(parsed.quantity);
     lastScanRaw = parsed.raw;
     showForm = true;
+  }
+
+  /**
+   * Übernimmt das Ergebnis der Lieferschein-Erkennung (OCR, siehe
+   * BarcodeScanner.svelte "Lieferschein"-Modus) als Review-Liste - anders als
+   * bei handleOcrResult() (ein einzelnes Etikett → ein Formular) kann ein
+   * Lieferschein mehrere Positionen enthalten, die hier alle einzeln
+   * an-/abwählbar und editierbar als Vorschlag angezeigt werden, bevor
+   * irgendetwas gespeichert wird (siehe commitDeliveryReview()).
+   */
+  function handleDeliveryNoteResult(rawText: string): void {
+    scannerOpen = false;
+    const parsed = parseDeliveryNoteText(rawText);
+    resetForm();
+    if (parsed.length === 0) {
+      deliveryNoteEmpty = true;
+      return;
+    }
+    deliveryReviewItems = parsed.map((item) => ({
+      id: crypto.randomUUID(),
+      selected: true,
+      articleNumber: item.articleNumber ?? '',
+      description: item.description,
+      quantity: item.quantity !== undefined ? String(item.quantity) : '1'
+    }));
+  }
+
+  function cancelDeliveryReview(): void {
+    deliveryReviewItems = [];
+  }
+
+  /** Legt für jede angehakte Review-Zeile eine eigene Materialposition an (gleiche Defaults wie beim Einzel-Scan: Einheit "Stk", Quelle "Bestellung"). */
+  async function commitDeliveryReview(): Promise<void> {
+    const selected = deliveryReviewItems.filter((item) => item.selected);
+    for (const item of selected) {
+      const description = item.description.trim();
+      const quantity = Number(item.quantity.replace(',', '.'));
+      if (!description || !Number.isFinite(quantity) || quantity <= 0) continue;
+      await addMaterialItem(reportId, {
+        description,
+        quantity,
+        unit: 'Stk',
+        articleNumber: item.articleNumber.trim(),
+        source: DEFAULT_SOURCE
+      });
+    }
+    deliveryReviewItems = [];
+    await load();
+    onChanged();
   }
 
   /** Übernimmt bei einer Katalog-Bezeichnung automatisch die hinterlegte Einheit, sofern der Nutzer sie noch nicht selbst geändert hat. */
@@ -273,7 +344,14 @@
     <p class="hint">Bericht ist gesperrt – Material kann nicht mehr geändert werden.</p>
   {:else if showForm && !editingId}
     {@render materialForm()}
-  {:else if !showForm}
+  {:else if deliveryReviewItems.length > 0}
+    {@render deliveryReview()}
+  {:else if deliveryNoteEmpty}
+    <div class="delivery-empty">
+      <p class="hint">Keine Positionen erkannt – bitte einzeln erfassen oder nochmal versuchen.</p>
+      <button type="button" class="ghost" onclick={() => (deliveryNoteEmpty = false)}>Schließen</button>
+    </div>
+  {:else}
     <div class="add-row">
       <button type="button" class="add" onclick={startAdd}>+ Position hinzufügen</button>
       <button type="button" class="scan" onclick={openScanner} aria-label="Material per Scan erfassen">
@@ -360,8 +438,47 @@
   </form>
 {/snippet}
 
+{#snippet deliveryReview()}
+  {@const selectedCount = deliveryReviewItems.filter((item) => item.selected).length}
+  <div class="delivery-review">
+    <p class="delivery-review-title">
+      {selectedCount} von {deliveryReviewItems.length} Positionen ausgewählt – bitte vor der Übernahme prüfen:
+    </p>
+    <ul class="delivery-review-list">
+      {#each deliveryReviewItems as item (item.id)}
+        <li class="delivery-review-row">
+          <input
+            type="checkbox"
+            checked={item.selected}
+            onchange={() => (item.selected = !item.selected)}
+            aria-label="Diese Position übernehmen"
+          />
+          <div class="delivery-review-fields">
+            <input type="text" bind:value={item.description} placeholder="Bezeichnung" />
+            <div class="delivery-review-meta">
+              <input type="text" bind:value={item.articleNumber} placeholder="Art.-Nr. (optional)" />
+              <input type="text" inputmode="decimal" bind:value={item.quantity} placeholder="Menge" />
+            </div>
+          </div>
+        </li>
+      {/each}
+    </ul>
+    <div class="form-actions">
+      <button type="button" class="ghost" onclick={cancelDeliveryReview}>Abbrechen</button>
+      <button type="button" class="primary" onclick={commitDeliveryReview} disabled={selectedCount === 0}>
+        {selectedCount} {selectedCount === 1 ? 'Position' : 'Positionen'} übernehmen
+      </button>
+    </div>
+  </div>
+{/snippet}
+
 {#if scannerOpen}
-  <BarcodeScanner onScan={handleScanResult} onOcrText={handleOcrResult} onClose={() => (scannerOpen = false)} />
+  <BarcodeScanner
+    onScan={handleScanResult}
+    onOcrText={handleOcrResult}
+    onDeliveryNoteText={handleDeliveryNoteResult}
+    onClose={() => (scannerOpen = false)}
+  />
 {/if}
 
 <style>
@@ -567,5 +684,76 @@
     padding: var(--space-2) var(--space-4);
     min-height: auto;
     font-weight: 600;
+  }
+
+  .primary:disabled {
+    opacity: 0.5;
+  }
+
+  .delivery-empty {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+  }
+
+  .delivery-review {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+  }
+
+  .delivery-review-title {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+
+  .delivery-review-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .delivery-review-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+  }
+
+  .delivery-review-row input[type='checkbox'] {
+    margin-top: 10px;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    accent-color: var(--color-primary);
+  }
+
+  .delivery-review-fields {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .delivery-review-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
   }
 </style>

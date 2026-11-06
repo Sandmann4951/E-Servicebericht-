@@ -1,14 +1,17 @@
 <script lang="ts">
   /**
-   * Vollbild-Kamera-Overlay zum Erfassen eines Lieferanten-Etiketts für die
-   * Material-Schnellerfassung (siehe MaterialSection.svelte), mit zwei
-   * Modi:
+   * Vollbild-Kamera-Overlay zum Erfassen eines Lieferanten-Etiketts ODER
+   * eines ganzen Lieferscheins für die Material-Schnellerfassung (siehe
+   * MaterialSection.svelte), mit drei Modi:
    * - "QR-Code": liest fortlaufend per `jsQR` einen QR-/Barcode aus dem
    *   Live-Videobild (z.B. den GS1-Code auf dem Etikett) - siehe onScan.
    * - "Etikett-Text": nimmt auf Tastendruck ein einzelnes Standbild auf und
    *   erkennt den gedruckten Text darauf per Texterkennung (OCR, `tesseract.js`) -
    *   viele Lieferanten-Etiketten tragen Artikelnummer, Beschreibung UND
    *   Stückzahl bereits als lesbaren Text, nicht nur im Code - siehe onOcrText.
+   * - "Lieferschein": gleiche Foto+OCR-Technik wie "Etikett-Text", aber für
+   *   einen ganzen Lieferschein mit MEHREREN Artikelpositionen statt nur
+   *   einem einzelnen Etikett - siehe onDeliveryNoteText.
    *
    * Beide nachgeladenen Bibliotheken (`jsQR`, `tesseract.js`) werden bewusst
    * erst beim tatsächlichen Öffnen des Scanners bzw. Umschalten in den
@@ -31,10 +34,16 @@
   let {
     onScan,
     onOcrText,
+    onDeliveryNoteText,
     onClose
-  }: { onScan: (text: string) => void; onOcrText: (text: string) => void; onClose: () => void } = $props();
+  }: {
+    onScan: (text: string) => void;
+    onOcrText: (text: string) => void;
+    onDeliveryNoteText: (text: string) => void;
+    onClose: () => void;
+  } = $props();
 
-  type Mode = 'qr' | 'photo';
+  type Mode = 'qr' | 'photo' | 'delivery';
 
   let videoEl = $state<HTMLVideoElement | undefined>();
   let mode = $state<Mode>('qr');
@@ -161,7 +170,11 @@
           data: { text }
         } = await worker.recognize(captureCanvas);
         stopCamera();
-        onOcrText(text);
+        if (mode === 'delivery') {
+          onDeliveryNoteText(text);
+        } else {
+          onOcrText(text);
+        }
       } finally {
         await worker.terminate();
       }
@@ -183,6 +196,7 @@
     <div class="mode-toggle" role="tablist" aria-label="Erfassungsart">
       <button type="button" class:active={mode === 'qr'} onclick={() => setMode('qr')}>QR-Code</button>
       <button type="button" class:active={mode === 'photo'} onclick={() => setMode('photo')}>Etikett-Text</button>
+      <button type="button" class:active={mode === 'delivery'} onclick={() => setMode('delivery')}>Lieferschein</button>
     </div>
 
     <div class="video-wrap">
@@ -197,12 +211,14 @@
         <p class="error">{ocrError}</p>
       {:else if mode === 'qr'}
         <p class="hint">QR-Code des Lieferanten-Etiketts in den Rahmen halten</p>
-      {:else}
+      {:else if mode === 'photo'}
         <p class="hint">Etikett-Text (Artikelnummer, Bezeichnung, Menge) in den Rahmen halten, dann Foto aufnehmen</p>
+      {:else}
+        <p class="hint">Lieferschein mit mehreren Positionen in den Rahmen halten, dann Foto aufnehmen</p>
       {/if}
     </div>
 
-    {#if mode === 'photo'}
+    {#if mode === 'photo' || mode === 'delivery'}
       <div class="capture-area">
         <button type="button" class="capture" onclick={capturePhoto} disabled={ocrRunning}>📸 Foto aufnehmen</button>
       </div>
