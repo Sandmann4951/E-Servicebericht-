@@ -69,7 +69,7 @@ export interface ParsedServiceOrder {
 // Schreibweisen zuerst in der Alternative, damit z.B. "Std." nicht schon
 // durch "Std" ohne den Punkt "abgeschnitten" wird (der Punkt würde sonst in
 // der Beschreibung hängen bleiben).
-const KNOWN_UNITS = ['Stück', 'Pauschale', 'Std\\.', 'Stck', 'Std', 'lfm', 'Set', 'Pkg', 'kg', 'm'];
+const KNOWN_UNITS = ['Stück', 'Pauschale', 'Pau', 'Std\\.', 'Stck', 'Std', 'lfm', 'Set', 'Pkg', 'kg', 'm'];
 const UNIT_PATTERN = KNOWN_UNITS.join('|');
 
 // z.B. "1.0104mLeitungsführungskanal LF 15x15 vw" -> Pos. "1.010", Menge "4", Einheit "m", Text "...".
@@ -144,6 +144,24 @@ function findCustomer(lines: string[]): string | undefined {
   return nameLine;
 }
 
+/**
+ * Fallback für die Kurzbeschreibung, wenn die bevorzugte Form "Auftrag: ..."
+ * (Text auf derselben Zeile) nichts liefert - bei einer neueren Vorlagen-
+ * Variante (z.B. echtes Beispiel Dok-Nr. 266070) bleibt die "Auftrag:"-Zeile
+ * leer und der eigentliche Text steht stattdessen auf der Zeile DIREKT NACH
+ * der leeren "Bemerkungen:"-Zeile. Die nachfolgende Zeile wird nur
+ * übernommen, wenn sie nicht bereits eines der nächsten bekannten
+ * Kopf-Labels ist (sonst wäre bei tatsächlich leeren Bemerkungen das
+ * nächste Label selbst fälschlich die "Beschreibung").
+ */
+function findBemerkungenFallback(lines: string[]): string | undefined {
+  const index = lines.findIndex((line) => /^Bemerkungen:\s*$/i.test(line));
+  if (index === -1) return undefined;
+  const next = lines[index + 1];
+  if (!next || /^(Projektnummer:|Sachbearbeiter:|Projektleiter:|-?\s*KUNDENDATEN)/i.test(next)) return undefined;
+  return next;
+}
+
 export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
   const raw = rawText.trim();
   const lines = raw
@@ -161,7 +179,7 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
   // ("Projektnr.: 266139") als echter, auslesbarer Text übrig.
   const projectNumber = findValue(lines, /Projektnummer:\s*(\S+)/) ?? findValue(lines, /Projektnr\.?:?\s*(\S+)/);
   const documentNumber = findValue(lines, /Dok-nr\.\s*:\s*(\S+)/);
-  const projectDescription = findValue(lines, /Auftrag:\s*(.+)/);
+  const projectDescription = findValue(lines, /Auftrag:\s*(.+)/) ?? findBemerkungenFallback(lines);
   const contactPerson = findValue(lines, /Ansprechpartner vor Ort:\s*(.+)/);
   const contactPhone = findValue(lines, /Telefon:\s*(.+)/);
   const customer = findCustomer(lines);
@@ -184,9 +202,14 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
 
   for (const line of lines) {
     if (TABLE_HEADER_LINE.test(line)) {
+      // NUR den Tabellen-Modus aktivieren - bewusst NICHT currentMaterial/
+      // currentLaborIndex zurücksetzen: dieselbe Kopfzeile taucht auf JEDER
+      // Seite erneut auf (siehe SAMPLE_RAW unten, "Seite X von Y" gefolgt
+      // von einer erneuten "Pos. Menge Ein. Text"-Zeile), eine Beschreibung
+      // kann aber über einen Seitenumbruch hinweg weitergehen (z.B.
+      // "...je" auf Seite 2, Fortsetzung "Wallbox" auf Seite 3) - ein Reset
+      // hier würde diese Fortsetzungszeile sonst stillschweigend verwerfen.
       inTable = true;
-      currentMaterial = undefined;
-      currentLaborIndex = undefined;
       continue;
     }
     if (!inTable || PAGE_FOOTER_LINE.test(line) || isBoilerplate(line)) continue;
@@ -214,7 +237,11 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
     const sectionMatch = SECTION_HEADER_LINE.exec(line);
     if (sectionMatch) {
       const title = sectionMatch[1].trim();
-      section = /arbeitsaufwand/i.test(title) ? 'labor' : 'material';
+      // "Arbeitsaufwand" (ältere Vorlagen-Variante) und "Lohn" (neuere
+      // Variante, z.B. reale Bestellung Dok-Nr. 266070) markieren beide
+      // denselben Abschnitt - keine Material-, sondern Zeit-/Pauschal-
+      // Positionen.
+      section = /arbeitsaufwand|lohn/i.test(title) ? 'labor' : 'material';
       currentMaterial = undefined;
       currentLaborIndex = undefined;
       continue;

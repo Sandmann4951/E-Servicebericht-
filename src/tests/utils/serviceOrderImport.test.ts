@@ -172,6 +172,148 @@ describe('parseServiceOrderText', () => {
     });
   });
 
+  // Echter Serviceauftrag (Dok-Nr. 266070, vom Nutzer hochgeladen) - neuere
+  // Vorlagen-Variante MIT zusätzlicher "Art.-Nr."-Spalte UND mit dem
+  // Abschnittstitel "Lohn" statt "Arbeitsaufwand" für den Zeit-/Pauschal-
+  // Teil. Ursprünglicher Bug: "Lohn" wurde nicht als solcher erkannt,
+  // dadurch landeten Arbeitsstunden-Positionen fälschlich in der
+  // Materialliste. Per echter pdfjs-Extraktion erzeugt (nicht von Hand
+  // getippt), inkl. Seitenumbruch mitten in einer Positionsbeschreibung
+  // ("...je" auf Seite 2, Fortsetzung "Wallbox" auf Seite 3).
+  const SAMPLE_RAW_LOHN = [
+    'ELSA cnc service GmbH - Ammerthalstr. 12 - 85551 Kirchheim b. München',
+    'Dok-nr.: 266070',
+    'Datum: 06.11.2026',
+    'Kundennr.: 60118',
+    'Firma',
+    'Projektnr.: 266164',
+    'DP World Logistics Germany B.V.&Co.KG',
+    'Mörser Str. 67',
+    '38442 Wolfsburg',
+    'IBAN: DE44 7025 0150 0040 2968 40',
+    'SWIFT-BIC BYLADEM1KMS',
+    'UID-Nr. DE162463240',
+    'ServiceauftragOriginal',
+    'e-solution',
+    'Auftrag:',
+    'Einsatzort:',
+    'Hinweis zum Installationsort:',
+    'Sonstige Infos:',
+    'Bemerkungen:',
+    'Erweiterung Ladeinfrastruktur, Lilienthalstraße 6, Freising',
+    'Projektnummer: 266164',
+    'Sachbearbeiter:',
+    'Projektleiter:',
+    '-KUNDENDATEN -',
+    'Firma',
+    'DP World Logistics Germany B.V.&Co.KG',
+    'Mörser Str. 67',
+    '38442 Wolfsburg',
+    'Ansprechpartner vor Ort: Rene Materna',
+    'Telefon: 089 32672888',
+    'E-Mail: ap-cc-invoice@dpworld.com',
+    'Pos.MengeEin.TextArt.-Nr.',
+    'Seite 1 von 3',
+    'Pos.MengeEin.TextArt.-Nr.',
+    '1Material',
+    '1.0102StückEasee Charge Up5213396',
+    '(22 kW, Steckdose Typ 2, RFID/APP,',
+    'integrierter Energiezähler,',
+    'WLAN/SIM+/Bluetooth, OCPP 1.6, FI',
+    'Typ A, DC-Schutz)',
+    '1.02020mDiverse NYY-J 5x6 RE Eca S0200425',
+    'Starkstromkabel NYY-J 5x6 RE Eca',
+    '1.0301StückSpelsberg Automatenkasten 400V0625282',
+    '6/16qmm 2x7p. AK 09',
+    '1.0401StückHager Phasenschiene0606736',
+    '4p,16qmm,12mod,Gabel KDN451D',
+    '1.0501StückHager Endkapp f.Phasenschiene 4-0606744',
+    'polig KZN024',
+    '1.0602StückABB Stotz Sicherungsautomat0641406',
+    'B,6kA,16A,3P S203-B16',
+    '1.08015StückFränkische Aluminium-Abstandschelle0520084',
+    'VDE 0605, 4456 ASG-E 25',
+    '1.0904StückFränkische Kunststoff-Endtülle grau0520091',
+    'E-Ku-E 25',
+    '1.1009mFränkische Aluminiumrohr, schwer0520125',
+    'VDE 0605, 4456 ALU Steck ES 25',
+    '1.1103StückFränkische Aluminium-Steckmuffe0520070',
+    'AMS-E 25',
+    '1.12015mFränkische Kunststoff-Wellrohr0500657',
+    'schwer 25,0x18,4mm FFKuS-ES-F-',
+    'UV25 sw',
+    '1.1301StückEasee-Stele mit Dach und',
+    'Kabelhaken für 2 Wallboxen',
+    '1.1401StückBeton-Fertigfundament',
+    '1.1501PauMontagezubehör',
+    '2Lohn',
+    '2.01010Std.Leitender Monteur1',
+    'Obermonteur für Energie- und',
+    'Gebäudetechnik',
+    '2.02010Std.Elektro Fachhelfer3',
+    'Energie- und Gebäudetechnik',
+    '2.0302Std.Projektleitung1',
+    '2.0402StückPauschale für die Inbetriebnahme und Zertifizierung je5013366',
+    'Seite 2 von 3',
+    'Pos.MengeEin.TextArt.-Nr.',
+    'Wallbox',
+    '2.0501StückRüstzeit-/Materialbeschaffung, Bearbeitungspauschale14',
+    '2.0603StückAn- und Abreisepauschale Zone 25013371',
+    'Beinhaltet: Reisezeit und Reisekilometer',
+    'ELSA cnc service GmbH • Ammerthalstr. 12 • 85551 Kirchheim b. MünchenKreissparkasse München Starnberg Ebersberg',
+    'GF Bernhard Sander • HRB 104822 München • UID-Nr. DE162463240IBAN: DE44 7025 0150 0040 2968 40',
+    'Tel.: +49 89 9033812 • www.elsa-service.de • Mail: info@elsa-service.deSWIFT-BIC BYLADEM1KMS',
+    'Seite 3 von 3'
+  ].join('\n');
+
+  describe('Abschnittstitel "Lohn" (neuere Vorlagen-Variante mit Art.-Nr.-Spalte, echtes Beispiel Dok-Nr. 266070)', () => {
+    it('erkennt Projektnummer, Kunde, Ansprechpartner, Telefon und Kurzbeschreibung (über "Bemerkungen:"-Fallback, da "Auftrag:" hier leer ist)', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.projectNumber).toBe('266164');
+      expect(result.documentNumber).toBe('266070');
+      expect(result.customer).toBe('DP World Logistics Germany B.V.&Co.KG');
+      expect(result.contactPerson).toBe('Rene Materna');
+      expect(result.contactPhone).toBe('089 32672888');
+      expect(result.projectDescription).toBe('Erweiterung Ladeinfrastruktur, Lilienthalstraße 6, Freising');
+    });
+
+    it('ordnet alle 14 Material-Positionen korrekt zu (keine Lohn-Positionen darunter)', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.materials).toHaveLength(14);
+      expect(result.materials.map((m) => m.unit)).toEqual([
+        'Stk',
+        'm',
+        'Stk',
+        'Stk',
+        'Stk',
+        'Stk',
+        'Stk',
+        'Stk',
+        'm',
+        'Stk',
+        'm',
+        'Stk',
+        'Stk',
+        'Pau'
+      ]);
+      expect(result.materials.at(-1)).toEqual({ description: 'Montagezubehör', quantity: 1, unit: 'Pau' });
+    });
+
+    it('erkennt den Abschnitt "Lohn" als Zeit-/Pauschal-Abschnitt (NICHT als Material) und summiert die Mannstunden', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.materials.some((m) => /Monteur|Fachhelfer|Projektleitung|Abreisepauschale|Rüstzeit/.test(m.description))).toBe(
+        false
+      );
+      expect(result.laborLines).toHaveLength(6);
+      expect(result.plannedLaborHours).toBe(22);
+    });
+
+    it('verliert die Fortsetzung einer Positionsbeschreibung NICHT, wenn sie über einen Seitenumbruch hinweg weitergeht ("...je" -> "Wallbox")', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.laborLines.some((line) => line.includes('Zertifizierung je5013366 Wallbox'))).toBe(true);
+    });
+  });
+
   describe('shouldAttemptOcrFallback', () => {
     it('ist true, wenn der extrahierte Text sehr kurz ist und weder Kunde noch Material erkannt wurden (bildlastigere PDF-Variante)', () => {
       const parsed = parseServiceOrderText(SAMPLE_RAW_IMAGE_HEAVY);
