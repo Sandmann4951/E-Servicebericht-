@@ -299,6 +299,38 @@ describe('parseServiceOrderText', () => {
       expect(result.materials.at(-1)).toEqual({ description: 'Montagezubehör', quantity: 1, unit: 'Pau' });
     });
 
+    it('trennt die am Ende angehängte 7-stellige Artikelnummer von der Beschreibung ab, statt sie im Namen zu belassen', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.materials[0]).toEqual({
+        description: 'Easee Charge Up (22 kW, Steckdose Typ 2, RFID/APP, integrierter Energiezähler, WLAN/SIM+/Bluetooth, OCPP 1.6, FI Typ A, DC-Schutz)',
+        quantity: 2,
+        unit: 'Stk',
+        articleNumber: '5213396'
+      });
+      expect(result.materials[3]).toEqual({
+        description: 'Hager Phasenschiene 4p,16qmm,12mod,Gabel KDN451D',
+        quantity: 1,
+        unit: 'Stk',
+        articleNumber: '0606736'
+      });
+      // Keine Beschreibung enthält mehr eine "nackte", direkt angehängte
+      // 7-stellige Artikelnummer ohne Leerzeichen davor.
+      expect(result.materials.every((m) => !/[^\s]\d{7}$/.test(m.description))).toBe(true);
+    });
+
+    it('lässt Positionen ohne Art.-Nr.-Spalteneintrag unverändert (keine Artikelnummer erkannt)', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      // Pos. 1.130-1.150 (Easee-Stele, Beton-Fertigfundament, Montagezubehör) haben im Dokument keine Art.-Nr.
+      expect(result.materials.slice(-3).every((m) => m.articleNumber === undefined)).toBe(true);
+    });
+
+    it('verwechselt eine Fortsetzungszeile, die zufällig mit "<Ziffer><Buchstabe>" beginnt, NICHT mit einem neuen Abschnitt (Pos. 1.040 "4p,16qmm,12mod,Gabel KDN451D")', () => {
+      const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
+      expect(result.materials[3].description).toBe('Hager Phasenschiene 4p,16qmm,12mod,Gabel KDN451D');
+      // Nachfolgende Position (1.050) muss trotzdem normal weiter erkannt werden.
+      expect(result.materials[4].description).toBe('Hager Endkapp f.Phasenschiene 4- polig KZN024');
+    });
+
     it('erkennt den Abschnitt "Lohn" als Zeit-/Pauschal-Abschnitt (NICHT als Material) und summiert die Mannstunden', () => {
       const result = parseServiceOrderText(SAMPLE_RAW_LOHN);
       expect(result.materials.some((m) => /Monteur|Fachhelfer|Projektleitung|Abreisepauschale|Rüstzeit/.test(m.description))).toBe(

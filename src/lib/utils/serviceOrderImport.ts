@@ -39,6 +39,14 @@ export interface ParsedServiceOrderMaterial {
   description: string;
   quantity: number;
   unit: string;
+  /**
+   * Herstelller-/Lieferanten-Artikelnummer aus der "Art.-Nr."-Spalte einer
+   * neueren Vorlagen-Variante (z.B. echtes Beispiel Dok-Nr. 266070) - dort
+   * steht sie ohne jedes Trennzeichen direkt hinter der Beschreibung auf
+   * derselben Zeile (siehe ARTICLE_NUMBER_SUFFIX unten). Die ältere
+   * Vorlagen-Variante ohne diese Spalte liefert hier einfach undefined.
+   */
+  articleNumber?: string;
 }
 
 export interface ParsedServiceOrder {
@@ -87,7 +95,20 @@ const UNIT_PATTERN = KNOWN_UNITS.join('|');
 // Parser statt zwei getrennter Implementierungen, der beide Formen versteht.
 const ITEM_LINE = new RegExp(`^\\d+\\.\\d{3}\\s*(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_PATTERN})\\s*(.+)$`);
 // z.B. "1Kabelkanal Markiese 1.OG" (pdfjs) oder "1 Kabelkanal Markiese 1.OG" (OCR) -> Abschnitt "1", Titel "Kabelkanal Markiese 1.OG".
-const SECTION_HEADER_LINE = /^\d+\s*([A-Za-zÄÖÜäöüß].*)$/;
+const SECTION_HEADER_LINE = /^(\d+)\s*([A-Za-zÄÖÜäöüß].*)$/;
+
+// Trennt die am Ende einer Material-Beschreibung ohne jedes Leerzeichen
+// angehängte Artikelnummer ab (z.B. "Hager Phasenschiene0606736" -> Text
+// "Hager Phasenschiene", Artikelnummer "0606736") - gilt NUR für die neuere
+// Vorlagen-Variante mit eigener "Art.-Nr."-Spalte (dort immer GENAU 7
+// Ziffern, durchgängig in allen Beispielen so beobachtet). Bewusst exakt 7
+// Ziffern statt "eine beliebige Ziffernfolge am Ende": verhindert, dass bei
+// der älteren Vorlagen-Variante (ohne Art.-Nr.-Spalte) eine zufällig am Ende
+// stehende kurze Zahl aus dem eigentlichen Produktnamen herausgeschnitten
+// wird. Die nicht-gierige Gruppe davor lässt die Regex-Engine automatisch
+// exakt die letzten 7 Ziffern als Artikelnummer isolieren, unabhängig davon,
+// was davor steht.
+const ARTICLE_NUMBER_SUFFIX = /^(.*?)(\d{7})$/;
 
 const TABLE_HEADER_LINE = /^Pos\.?\s*Menge\s*Ein\.?\s*Text/i;
 const PAGE_FOOTER_LINE = /^Seite\s+\d+\s+von\s+\d+$/i;
@@ -199,6 +220,15 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
   // Gebäudetechnik") werden daran als Fortsetzung der Beschreibung angehängt.
   let currentMaterial: ParsedServiceOrderMaterial | undefined;
   let currentLaborIndex: number | undefined;
+  // Abschnitte sind im Vorlagen-Format immer fortlaufend ab 1 nummeriert
+  // (1, 2, 3, ...) - echte Beispiele bestätigen das sowohl in der älteren
+  // ("1Kabelkanal...", "2Markiese...", ..., "5Arbeitsaufwand") als auch der
+  // neueren Variante ("1Material", "2Lohn"). Ohne diese Prüfung würde eine
+  // Fortsetzungszeile, die zufällig mit "<Ziffer><Buchstabe>" beginnt (z.B.
+  // "4p,16qmm,12mod,Gabel KDN451D" als zweite Zeile einer Materialposition),
+  // fälschlich als neuer Abschnitt erkannt - inkl. Reset von currentMaterial,
+  // wodurch der Rest der Beschreibung stillschweigend verloren ginge.
+  let nextSectionNumber = 1;
 
   for (const line of lines) {
     if (TABLE_HEADER_LINE.test(line)) {
@@ -227,7 +257,11 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
         currentMaterial = undefined;
         if (unit === 'Std') plannedLaborHoursSum += quantity;
       } else {
-        currentMaterial = { description: text, quantity, unit };
+        const artMatch = ARTICLE_NUMBER_SUFFIX.exec(text);
+        const hasArticleNumber = artMatch && artMatch[1].trim();
+        currentMaterial = hasArticleNumber
+          ? { description: artMatch[1].trim(), quantity, unit, articleNumber: artMatch[2] }
+          : { description: text, quantity, unit };
         materials.push(currentMaterial);
         currentLaborIndex = undefined;
       }
@@ -235,8 +269,8 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
     }
 
     const sectionMatch = SECTION_HEADER_LINE.exec(line);
-    if (sectionMatch) {
-      const title = sectionMatch[1].trim();
+    if (sectionMatch && Number(sectionMatch[1]) === nextSectionNumber) {
+      const title = sectionMatch[2].trim();
       // "Arbeitsaufwand" (ältere Vorlagen-Variante) und "Lohn" (neuere
       // Variante, z.B. reale Bestellung Dok-Nr. 266070) markieren beide
       // denselben Abschnitt - keine Material-, sondern Zeit-/Pauschal-
@@ -244,6 +278,7 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
       section = /arbeitsaufwand|lohn/i.test(title) ? 'labor' : 'material';
       currentMaterial = undefined;
       currentLaborIndex = undefined;
+      nextSectionNumber++;
       continue;
     }
 

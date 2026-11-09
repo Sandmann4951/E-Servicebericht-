@@ -185,6 +185,7 @@ export async function importServiceOrderFromFile(
         description: material.description,
         quantity: material.quantity,
         unit: material.unit,
+        articleNumber: material.articleNumber,
         plannedQuantity: material.quantity,
         // Wie bei manuell angelegten Positionen standardmäßig "Bestellung" -
         // im Material-Tab jederzeit auf "Lager" umstellbar.
