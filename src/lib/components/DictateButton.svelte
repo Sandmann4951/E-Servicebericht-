@@ -5,6 +5,11 @@
    * Bibliothek und ohne Kosten. Erscheint nur, wenn der Browser sie
    * anbietet. Fertig erkannte Textbausteine gehen über `onText` an das
    * jeweilige Feld (siehe utils/dictation.ts appendDictatedText()).
+   *
+   * Auf iPhone/iPad bewusst ausgeblendet: dort startet die Erkennung zwar,
+   * liefert aber (vor allem in der Homescreen-App) keinen Text und hat auf
+   * einem echten Gerät die ganze Oberfläche blockiert. iOS bringt dafür die
+   * Diktiertaste auf der Tastatur mit, die in jedem Textfeld funktioniert.
    */
   import Icon from './Icon.svelte';
 
@@ -31,8 +36,12 @@
   }
   type RecognitionCtor = new () => Recognition;
 
+  const isIOS =
+    typeof navigator !== 'undefined' &&
+    (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
   const Ctor: RecognitionCtor | undefined =
-    typeof window === 'undefined'
+    typeof window === 'undefined' || isIOS
       ? undefined
       : ((window as unknown as { SpeechRecognition?: RecognitionCtor }).SpeechRecognition ??
         (window as unknown as { webkitSpeechRecognition?: RecognitionCtor }).webkitSpeechRecognition);
@@ -51,13 +60,24 @@
   function toggle(): void {
     if (!Ctor) return;
     if (listening) {
-      recognition?.stop();
+      // stop() liefert noch das letzte Ergebnis; reagiert der Browser darauf
+      // nicht, wird hart abgebrochen, damit der Knopf nie hängen bleibt.
+      const current = recognition;
+      current?.stop();
+      setTimeout(() => {
+        if (recognition === current && listening) {
+          current?.abort();
+          listening = false;
+          recognition = undefined;
+        }
+      }, 1500);
       return;
     }
     error = undefined;
     const instance = new Ctor();
     instance.lang = 'de-DE';
-    instance.continuous = true;
+    // Ein Satz pro Antippen: der Dauerbetrieb ist je nach Browser unzuverlässig.
+    instance.continuous = false;
     instance.interimResults = false;
     instance.onresult = (event) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
