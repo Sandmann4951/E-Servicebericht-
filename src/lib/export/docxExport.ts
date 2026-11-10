@@ -233,7 +233,8 @@ function buildTemplateData(data: FullReport): Record<string, unknown> {
     // Vorlagen-Tags selbst ("Kirchheim bei München, {exportDate}"), hier
     // wird nur das Datum eingesetzt.
     exportDate: formatDateDE(todayISODate()),
-    materials: materialItems.map(materialRowData),
+    // Menge 0 = laut Soll/Ist-Abgleich nicht verbaut - gehört nicht in die Materialliste.
+    materials: materialItems.filter((item) => item.quantity > 0).map(materialRowData),
     objectAddress: report.objectAddress ?? '',
     contactEmail: report.contactEmail ?? '',
     orderNumber: report.orderNumber ?? '',

@@ -235,6 +235,15 @@ export interface TimeEntry {
    * Formularfeld.
    */
   reportedAt?: ISODateTime;
+  /**
+   * Exakt die Zeile, die für die Notiz dieses Eintrags zuletzt in
+   * `ServiceReport.performedWork` geschrieben wurde (siehe
+   * db/performedWorkSync.ts) - damit lässt sich die Zeile bei einer
+   * späteren Änderung von Notiz/Uhrzeit gezielt ersetzen statt erneut
+   * anzuhängen. `undefined` = für diesen Eintrag steht (noch) nichts dort.
+   * Rein intern gesetzt, kein Formularfeld.
+   */
+  performedWorkLine?: string;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -347,6 +356,14 @@ export interface MaterialItem {
    * MaterialSection.svelte. Rein intern gesetzt, kein Formularfeld.
    */
   reportedQuantity?: number;
+  /**
+   * Der Monteur hat die tatsächlich verbaute Menge (`quantity`) dieser aus
+   * einem Serviceauftrag importierten Position ausdrücklich bestätigt bzw.
+   * angepasst (Soll/Ist-Abgleich in MaterialSection.svelte, siehe
+   * utils/materialPlan.ts). Nur für Positionen mit `plannedQuantity` von
+   * Bedeutung.
+   */
+  quantityConfirmed?: boolean;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -418,4 +435,4 @@ export interface ServiceBerichtDB extends DBSchema {
 }
 
 export const DB_NAME = 'e-servicebericht-db';
-export const DB_VERSION = 6;
+export const DB_VERSION = 7;

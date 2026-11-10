@@ -6,14 +6,16 @@
     listTimeEntries,
     trimOverlappingTimeEntries
   } from '../db/timeEntries';
-  import { getReport, updateReport } from '../db/reports';
+  import { getReport } from '../db/reports';
+  import { syncPerformedWorkFromNotes } from '../db/performedWorkSync';
   import { addManualBreak, updateManualTimeEntry } from '../clockActions';
   import type { TimeEntry } from '../db/types';
   import { centeredBreakWindow, computeDurationMinutes, formatDateDE, formatDurationMinutes, todayISODate } from '../utils/date';
   import { exceedsMaxDailyWork } from '../utils/arbzg';
-  import { appendPerformedWorkLine, formatTimeEntryPerformedWorkLine, shouldAppendPerformedWorkLine } from '../utils/performedWorkNote';
+  import { appendDictatedText } from '../utils/dictation';
   import { isTimeEntryReported } from '../export/exportScope';
   import Icon from './Icon.svelte';
+  import DictateButton from './DictateButton.svelte';
 
   let {
     reportId,
@@ -166,19 +168,10 @@
         : undefined;
     const payload = { date: formDate, startTime, endTime, note: formNote, isTravel: formTravel, kilometers };
 
-    // Nur beim ERSTMALIGEN Ausfüllen einer bisher leeren Notiz (neuer
-    // Eintrag, oder nachträgliches erstmaliges Ausfüllen) hängt diese
-    // Funktion unten eine neue Zeile ans Ende von "Durchgeführte Arbeiten"
-    // (ServiceReport.performedWork) an - siehe utils/performedWorkNote.ts
-    // für die genaue Begründung (kein Nachziehen bei jeder Änderung).
-    const previousNote = editingId ? editingOriginal?.note : undefined;
-    async function appendPerformedWorkIfFirstTime(): Promise<void> {
-      if (!shouldAppendPerformedWorkLine(previousNote, formNote)) return;
-      const report = await getReport(reportId);
-      if (!report) return;
-      const line = formatTimeEntryPerformedWorkLine({ date: formDate, startTime, endTime }, formNote);
-      await updateReport(reportId, { performedWork: appendPerformedWorkLine(report.performedWork, line) });
-    }
+    // Die Notiz landet als eigene Zeile in "Durchgeführte Arbeiten" und wird
+    // dort bei späteren Änderungen ersetzt statt erneut angehängt - siehe
+    // db/performedWorkSync.ts.
+    const syncPerformedWork = (): Promise<unknown> => syncPerformedWorkFromNotes(reportId);
 
     // Plausibilitätsprüfung nur möglich, wenn Start UND Ende gesetzt sind -
     // sonst gibt es keine vergleichbare Zeitspanne. Prüft berichtsübergreifend
@@ -209,7 +202,7 @@
         await persistEntry(payload);
         await trimOverlappingTimeEntries(overlaps, startTime, endTime);
         await applyPauseIfNeeded(startTime, endTime);
-        await appendPerformedWorkIfFirstTime();
+        await syncPerformedWork();
         resetForm();
         await load();
         onChanged();
@@ -219,7 +212,7 @@
 
     await persistEntry(payload);
     await applyPauseIfNeeded(startTime, endTime);
-    await appendPerformedWorkIfFirstTime();
+    await syncPerformedWork();
     resetForm();
     await load();
     onChanged();
@@ -301,10 +294,13 @@
         <input type="number" inputmode="decimal" step="0.1" min="0" bind:value={formKilometers} placeholder="z.B. 42" />
       </label>
     {/if}
-    <label>
-      Durchgeführte Arbeiten (optional)
-      <textarea rows="2" bind:value={formNote} placeholder="z.B. Fehlersuche, Inbetriebnahme…"></textarea>
-    </label>
+    <div class="dictate-field">
+      <label>
+        Durchgeführte Arbeiten (optional)
+        <textarea rows="2" bind:value={formNote} placeholder="z.B. Fehlersuche, Inbetriebnahme…"></textarea>
+      </label>
+      <DictateButton onText={(text) => (formNote = appendDictatedText(formNote, text))} />
+    </div>
     <div class="form-actions">
       <button type="button" class="ghost" onclick={resetForm}>Abbrechen</button>
       <button type="submit" class="primary">Speichern</button>

@@ -1,6 +1,7 @@
 import { getDB } from './client';
 import { recomputeReportSummary } from './summary';
 import { computeDurationMinutes, parseTimeToMinutes } from '../utils/date';
+import { applyNoteLine } from '../utils/performedWorkNote';
 import type { ID, TimeEntry, TimeEntryTrimRecord } from './types';
 
 const ALL_STORES = ['timeEntries', 'materialItems', 'photos', 'reports'] as const;
@@ -320,7 +321,19 @@ export async function deleteTimeEntry(id: ID): Promise<void> {
     return;
   }
   await store.delete(id);
-  if (entry.reportId) await recomputeReportSummary(tx, entry.reportId);
+  if (entry.reportId) {
+    // Die zu diesem Eintrag gehörende Zeile in "Durchgeführte Arbeiten"
+    // (siehe performedWorkSync.ts) verschwindet mit dem Eintrag.
+    if (entry.performedWorkLine) {
+      const reports = tx.objectStore('reports');
+      const report = await reports.get(entry.reportId);
+      if (report && !report.finalizedAt) {
+        report.performedWork = applyNoteLine(report.performedWork, entry.performedWorkLine, undefined) || undefined;
+        await reports.put(report);
+      }
+    }
+    await recomputeReportSummary(tx, entry.reportId);
+  }
   await tx.done;
 }
 

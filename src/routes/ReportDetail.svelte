@@ -10,15 +10,18 @@
     unlockReport,
     updateReport
   } from '../lib/db/reports';
-  import { getActiveTimeEntry, markTimeEntriesReported } from '../lib/db/timeEntries';
-  import { markMaterialItemsReported } from '../lib/db/materialItems';
+  import { getActiveTimeEntry, listTimeEntries, markTimeEntriesReported } from '../lib/db/timeEntries';
+  import { listMaterialItems, markMaterialItemsReported } from '../lib/db/materialItems';
+  import { syncPerformedWorkFromNotes } from '../lib/db/performedWorkSync';
   import { switchToIdle } from '../lib/clockActions';
   import type { OrderType, PlantStatus, ReportStatus, ServiceReport } from '../lib/db/types';
   import { navigate } from '../lib/router.svelte';
   import { debounce } from '../lib/utils/debounce';
   import { formatDateTimeDE, formatDurationMinutes } from '../lib/utils/date';
   import { splitContactPersonAndPhone } from '../lib/utils/contactPerson';
-  import { missingRequiredFieldsForFinalize } from '../lib/utils/reportFinalization';
+  import { missingRequiredFieldKeys, type RequiredFieldKey } from '../lib/utils/reportFinalization';
+  import { collectFinalizeWarnings, type FinalizeAction, type FinalizeWarning, type ReportTab } from '../lib/utils/finalizeChecks';
+  import { appendDictatedText } from '../lib/utils/dictation';
   import { filterToUnreportedOnly, hasUnreportedContent, reportNeverExported } from '../lib/export/exportScope';
   import { getTechnicianName, setTechnicianName } from '../lib/settings';
   import TimeClock from '../lib/components/TimeClock.svelte';
@@ -28,6 +31,9 @@
   import SignatureSection from '../lib/components/SignatureSection.svelte';
   import StatusBadge from '../lib/components/StatusBadge.svelte';
   import Icon from '../lib/components/Icon.svelte';
+  import CurrentWorkNote from '../lib/components/CurrentWorkNote.svelte';
+  import DictateButton from '../lib/components/DictateButton.svelte';
+  import FinalizeAssistant from '../lib/components/FinalizeAssistant.svelte';
 
   // Exakt die festen Auswahloptionen der jeweiligen Dropdown-Inhaltssteuerung
   // in der ELSA-Vorlage (siehe db/types.ts PlantStatus/OrderType) - keine
@@ -112,6 +118,21 @@
   let signedByName = $state<string | undefined>(undefined);
   let signedAt = $state<string | undefined>(undefined);
   let finalizedAt = $state<string | undefined>(undefined);
+  let exportedAt = $state<string | undefined>(undefined);
+
+  // Erhöht sich bei jeder Änderung an den Zeiten (Ein-/Auschecken usw.) -
+  // CurrentWorkNote lädt daraufhin den Abschnitt neu, dem es zugeordnet ist.
+  let clockVersion = $state(0);
+  // "Durchgeführte Arbeiten (gesamt)" ist in der Übersicht eingeklappt: im
+  // Alltag trägt der Monteur oben nur ein, woran er gerade arbeitet.
+  let performedWorkOpen = $state(false);
+  const performedWorkLineCount = $derived(performedWork.split('\n').filter((line) => line.trim()).length);
+
+  /** Offener Abschluss-Assistent (siehe runWithAssistant()) - `proceed` ist die eigentliche Aktion danach. */
+  let assistant = $state<
+    | { action: FinalizeAction; requiredKeys: RequiredFieldKey[]; warnings: FinalizeWarning[]; proceed: () => void | Promise<void> }
+    | undefined
+  >(undefined);
 
   /**
    * Alle Berichte mit derselben Projektnummer wie dieser (chronologisch,
@@ -179,7 +200,7 @@
   // (Zeiten/Material/Fotos). Per Tap auf die Kopfzeile jederzeit umschaltbar.
   let fieldsExpanded = $state(isNewRoute);
 
-  let activeTab = $state<'übersicht' | 'zeiten' | 'material' | 'fotos' | 'unterschrift'>('übersicht');
+  let activeTab = $state<ReportTab>('übersicht');
   let savedPulseVisible = $state(false);
   let savedPulseTimeout: ReturnType<typeof setTimeout> | undefined;
   let projectNumberMissing = $state(false);
@@ -315,6 +336,35 @@
   }
 
   /**
+   * Zieht die Notizen der Zeiteinträge in "Durchgeführte Arbeiten" nach
+   * (db/performedWorkSync.ts) und übernimmt das Ergebnis ins Formular. Läuft
+   * bewusst in derselben Kette wie persistNow(): ein noch ausstehendes
+   * Speichern wird vorher geschrieben, und ein späteres Speichern kann den
+   * gerade ergänzten Text nicht mit einem veralteten Stand überschreiben.
+   */
+  function syncPerformedWork(): Promise<void> {
+    flushNow();
+    saveChain = saveChain
+      .then(async () => {
+        if (!reportId) return;
+        const text = await syncPerformedWorkFromNotes(reportId);
+        if (text !== undefined) performedWork = text;
+      })
+      .catch((err) => console.error('Abgleich der Arbeitsnotizen fehlgeschlagen', err));
+    return saveChain;
+  }
+
+  type DictationField = 'performedWork' | 'notes' | 'additionalWorkNotes' | 'deficiencies';
+
+  function dictateInto(field: DictationField, text: string): void {
+    if (field === 'performedWork') performedWork = appendDictatedText(performedWork, text);
+    else if (field === 'notes') notes = appendDictatedText(notes, text);
+    else if (field === 'additionalWorkNotes') additionalWorkNotes = appendDictatedText(additionalWorkNotes, text);
+    else deficiencies = appendDictatedText(deficiencies, text);
+    onFieldChange();
+  }
+
+  /**
    * Prüft beim Verlassen des Projektnummer-Feldes (onblur), ob zu dieser
    * Nummer bereits ein ANDERER offener (nicht gesperrter) Bericht existiert -
    * und zwar bewusst NICHT als Teil von persistNow() selbst, sondern erst
@@ -396,7 +446,10 @@
     if (isNewRoute) return;
     let cancelled = false;
     loading = true;
-    getReport(id).then((report) => {
+    syncPerformedWorkFromNotes(id)
+      .catch(() => undefined)
+      .then(() => getReport(id))
+      .then((report) => {
       if (cancelled) return;
       if (!report) {
         notFound = true;
@@ -434,6 +487,7 @@
       signedByName = report.signedByName;
       signedAt = report.signedAt;
       finalizedAt = report.finalizedAt;
+      exportedAt = report.exportedAt;
       loading = false;
 
       listReportsByProjectNumber(report.projectNumber).then((related) => {
@@ -464,6 +518,8 @@
 
   async function refreshSummary(): Promise<void> {
     if (!reportId) return;
+    await syncPerformedWork();
+    clockVersion++;
     const report = await getReport(reportId);
     if (!report) return;
     timeEntryCount = report.timeEntryCount;
@@ -500,25 +556,45 @@
   }
 
   /**
-   * Blockiert den Abschluss-Vorgang, falls Pflichtfelder fehlen (siehe
-   * utils/reportFinalization.ts) - springt dabei in den Übersicht-Tab (wo
-   * die Felder liegen), damit der Monteur sie direkt nachtragen kann, statt
-   * raten zu müssen, wo er suchen soll.
-   * @returns true, wenn blockiert wurde (Aufrufer muss dann abbrechen).
+   * Führt `proceed` aus - vorher über den Abschluss-Assistenten, wenn noch
+   * Pflichtfelder fehlen oder es Hinweise gibt (`always`: immer anzeigen,
+   * dient dann zugleich als Sicherheitsabfrage). Vor der Unterschrift
+   * erscheint er nur bei fehlenden Pflichtfeldern.
    */
-  function blockIfRequiredFieldsMissing(action: 'abschließen' | 'exportieren'): boolean {
-    const missing = missingRequiredFieldsForFinalize({ plantStatus, securityEquipmentOk, followUpVisitNeeded });
-    if (missing.length === 0) return false;
-    activeTab = 'übersicht';
-    alert(
-      `Bericht kann noch nicht ${action} werden. Bitte zuerst folgende Pflichtfelder in der Übersicht ausfüllen:\n\n${missing.map((field) => `• ${field}`).join('\n')}`
-    );
-    return true;
+  async function runWithAssistant(action: FinalizeAction, proceed: () => void | Promise<void>, always = false): Promise<void> {
+    if (!reportId || assistant) return;
+    await syncPerformedWork();
+    const [timeEntries, materialItems] = await Promise.all([listTimeEntries(reportId), listMaterialItems(reportId)]);
+    const requiredKeys = missingRequiredFieldKeys({ plantStatus, securityEquipmentOk, followUpVisitNeeded });
+    const warnings = collectFinalizeWarnings({ timeEntries, materialItems, performedWork, action });
+    const nothingToAsk = requiredKeys.length === 0 && (action === 'sign' || warnings.length === 0);
+    if (!always && nothingToAsk) {
+      await proceed();
+      return;
+    }
+    assistant = { action, requiredKeys, warnings, proceed };
+  }
+
+  function confirmAssistant(): void {
+    const proceed = assistant?.proceed;
+    assistant = undefined;
+    void proceed?.();
+  }
+
+  function jumpFromAssistant(tab: ReportTab): void {
+    assistant = undefined;
+    activeTab = tab;
   }
 
   async function saveSignature(blob: Blob, name: string, width: number, height: number): Promise<void> {
     if (!reportId) return;
-    if (blockIfRequiredFieldsMissing('abschließen')) return;
+    if (missingRequiredFieldKeys({ plantStatus, securityEquipmentOk, followUpVisitNeeded }).length > 0) {
+      await runWithAssistant('sign', () => saveSignature(blob, name, width, height));
+      return;
+    }
+    // Erst auschecken, dann sperren: nur so kommt die Zeile des letzten
+    // Abschnitts noch mit ihrer Endzeit in "Durchgeführte Arbeiten".
+    await autoStopActiveClock();
     const updated = await setReportSignature(reportId, { blob, signedByName: name, width, height });
     if (!updated) return;
     signatureBlob = updated.signatureBlob;
@@ -529,27 +605,24 @@
 
     // Unterschreiben sperrt den Bericht (siehe `locked`). Der Status springt
     // konsequent auf "Abgeschlossen".
-    await autoStopActiveClock();
     if (status !== 'completed') status = 'completed';
     await queueSave();
   }
 
-  /** Schließt den Bericht final ab, ohne Kunden-Unterschrift - z.B. wenn keine Unterschrift nötig oder möglich ist. */
-  async function finalizeWithoutSignature(): Promise<void> {
+  /** Schließt den Bericht final ab, ohne Kunden-Unterschrift - z.B. wenn keine Unterschrift nötig oder möglich ist. Der Assistent dient dabei zugleich als Sicherheitsabfrage. */
+  function finalizeWithoutSignature(): void {
     if (!reportId || locked) return;
-    if (blockIfRequiredFieldsMissing('abschließen')) return;
-    if (
-      !confirm(
-        'Bericht ohne Kunden-Unterschrift final abschließen? Er wird danach gesperrt und lässt sich nicht mehr ändern, bis die Sperre wieder aufgehoben wird.'
-      )
-    )
-      return;
+    void runWithAssistant('finalize', doFinalizeWithoutSignature, true);
+  }
+
+  async function doFinalizeWithoutSignature(): Promise<void> {
+    if (!reportId || locked) return;
+    await autoStopActiveClock();
     const updated = await finalizeReport(reportId);
     if (!updated) return;
     status = updated.status;
     finalizedAt = updated.finalizedAt;
     flashSaved();
-    await autoStopActiveClock();
   }
 
   /** Hebt die Sperre auf (egal ob durch Unterschrift oder manuelles Abschließen entstanden) - ohne eigene Bestätigung, wird von den aufrufenden Stellen jeweils selbst abgefragt. */
@@ -625,12 +698,18 @@
     await markTimeEntriesReported(exportedData.timeEntries.map((entry) => entry.id));
     await markMaterialItemsReported(exportedData.materialItems.map((item) => item.id));
     await markReportExported(exportedReportId);
+    exportedAt = new Date().toISOString();
     listsVersion++;
   }
 
-  async function exportReport(): Promise<void> {
+  /** Export-Knopf: fehlen Pflichtfelder oder gibt es Hinweise, fragt zuerst der Abschluss-Assistent nach. */
+  function exportReport(): void {
     if (!reportId || exporting) return;
-    if (blockIfRequiredFieldsMissing('exportieren')) return;
+    void runWithAssistant('export', runExport);
+  }
+
+  async function runExport(): Promise<void> {
+    if (!reportId || exporting) return;
     exporting = true;
     exportError = false;
     try {
@@ -725,6 +804,13 @@
       projectNumberMissing = true;
       return;
     }
+    // Pflichtfelder klären, BEVOR der Kunde unterschreibt - nicht erst danach.
+    if (tab === 'unterschrift' && !locked && !signatureBlob) {
+      void runWithAssistant('sign', () => {
+        activeTab = tab;
+      });
+      return;
+    }
     activeTab = tab;
   }
 </script>
@@ -774,7 +860,12 @@
               Final abgeschlossen am {finalizedAt ? new Date(finalizedAt).toLocaleString('de-DE') : ''} (ohne Unterschrift) – der Bericht ist gesperrt.
             {/if}
           </p>
-          <button type="button" class="unlock" onclick={unlockManually}><Icon name="unlock" size={15} />Sperre aufheben</button>
+          <div class="locked-actions">
+            {#if !exportedAt}
+              <button type="button" class="unlock" onclick={exportReport} disabled={exporting}><Icon name="download" size={15} />Jetzt exportieren</button>
+            {/if}
+            <button type="button" class="unlock" onclick={unlockManually}><Icon name="unlock" size={15} />Sperre aufheben</button>
+          </div>
         </div>
       {/if}
       {#if reportId}
@@ -1025,6 +1116,7 @@
           <div class="overview">
             {#if reportId}
               <TimeClock {reportId} {locked} onChanged={refreshSummary} bind:runningMinutes />
+              <CurrentWorkNote {reportId} {locked} version={clockVersion} onSaved={syncPerformedWork} />
             {/if}
             <div class="stats">
               <div class="stat"><strong>{timeEntryCount}</strong><span>Tage</span></div>
@@ -1047,28 +1139,53 @@
                 </div>
               </div>
             {/if}
-            <label>
-              Durchgeführte Arbeiten
-              <textarea
-                rows="5"
-                bind:value={performedWork}
-                oninput={onFieldChange}
-                onblur={flushNow}
-                placeholder="Was wurde beim Einsatz konkret gemacht?"
-                disabled={locked}
-              ></textarea>
-            </label>
-            <label>
-              Notizen
-              <textarea
-                rows="5"
-                bind:value={notes}
-                oninput={onFieldChange}
-                onblur={flushNow}
-                placeholder="Allgemeine Notizen zum Einsatz…"
-                disabled={locked}
-              ></textarea>
-            </label>
+            <div class="dictate-field">
+              <label>
+                Notizen
+                <textarea
+                  rows="4"
+                  bind:value={notes}
+                  oninput={onFieldChange}
+                  onblur={flushNow}
+                  placeholder="Allgemeine Notizen zum Einsatz…"
+                  disabled={locked}
+                ></textarea>
+              </label>
+              {#if !locked}<DictateButton onText={(text) => dictateInto('notes', text)} />{/if}
+            </div>
+
+            <!-- Der gesamte, über alle Einsätze gesammelte Text - so erscheint er
+                 im Servicebericht. Eingeklappt, weil im Alltag das Feld "Woran
+                 arbeitest du gerade?" oben genügt. -->
+            <div class="collapsible">
+              <button
+                type="button"
+                class="collapsible-toggle"
+                onclick={() => (performedWorkOpen = !performedWorkOpen)}
+                aria-expanded={performedWorkOpen}
+              >
+                <span>
+                  Durchgeführte Arbeiten (gesamt){#if performedWorkLineCount > 0}{' '}<span class="collapsible-count">· {performedWorkLineCount} {performedWorkLineCount === 1 ? 'Zeile' : 'Zeilen'}</span>{/if}
+                </span>
+                <span class="chevron" class:open={performedWorkOpen}><Icon name="chevron-down" size={16} /></span>
+              </button>
+              {#if performedWorkOpen}
+                <div class="dictate-field collapsible-body">
+                  <label>
+                    So erscheint es im Servicebericht
+                    <textarea
+                      rows="7"
+                      bind:value={performedWork}
+                      oninput={onFieldChange}
+                      onblur={flushNow}
+                      placeholder="Was wurde bei den bisherigen Einsätzen gemacht?"
+                      disabled={locked}
+                    ></textarea>
+                  </label>
+                  {#if !locked}<DictateButton onText={(text) => dictateInto('performedWork', text)} />{/if}
+                </div>
+              {/if}
+            </div>
 
             <h3 class="section-heading">
               Vor dem Abschließen erforderlich
@@ -1131,29 +1248,35 @@
 
             <h3 class="section-heading">Zusatzinformationen</h3>
 
-            <label>
-              Mehrungen (optional)
-              <textarea
-                rows="3"
-                bind:value={additionalWorkNotes}
-                oninput={onFieldChange}
-                onblur={flushNow}
-                placeholder="Zusätzlich zum Auftrag festgestellter Mehraufwand…"
-                disabled={locked}
-              ></textarea>
-            </label>
+            <div class="dictate-field">
+              <label>
+                Mehrungen (optional)
+                <textarea
+                  rows="3"
+                  bind:value={additionalWorkNotes}
+                  oninput={onFieldChange}
+                  onblur={flushNow}
+                  placeholder="Zusätzlich zum Auftrag festgestellter Mehraufwand…"
+                  disabled={locked}
+                ></textarea>
+              </label>
+              {#if !locked}<DictateButton onText={(text) => dictateInto('additionalWorkNotes', text)} />{/if}
+            </div>
 
-            <label>
-              Festgestellte Mängel (optional)
-              <textarea
-                rows="3"
-                bind:value={deficiencies}
-                oninput={onFieldChange}
-                onblur={flushNow}
-                placeholder="Beim Einsatz festgestellte Mängel…"
-                disabled={locked}
-              ></textarea>
-            </label>
+            <div class="dictate-field">
+              <label>
+                Festgestellte Mängel (optional)
+                <textarea
+                  rows="3"
+                  bind:value={deficiencies}
+                  oninput={onFieldChange}
+                  onblur={flushNow}
+                  placeholder="Beim Einsatz festgestellte Mängel…"
+                  disabled={locked}
+                ></textarea>
+              </label>
+              {#if !locked}<DictateButton onText={(text) => dictateInto('deficiencies', text)} />{/if}
+            </div>
 
             <div class="toggle-field">
               <span class="toggle-label">Braucht der Kunde ein Angebot?</span>
@@ -1212,6 +1335,22 @@
     </div>
   {/if}
 </div>
+
+{#if assistant}
+  <FinalizeAssistant
+    action={assistant.action}
+    requiredKeys={assistant.requiredKeys}
+    warnings={assistant.warnings}
+    plantStatusOptions={PLANT_STATUS_OPTIONS}
+    bind:plantStatus
+    bind:securityEquipmentOk
+    bind:followUpVisitNeeded
+    onFieldChange={() => void queueSave()}
+    onConfirm={confirmAssistant}
+    onCancel={() => (assistant = undefined)}
+    onJump={jumpFromAssistant}
+  />
+{/if}
 
 <style>
   .screen {
@@ -1552,6 +1691,46 @@
   .tabs button.active {
     color: var(--color-primary);
     border-bottom-color: var(--color-primary);
+  }
+
+  .locked-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .locked-banner .unlock {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .collapsible {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+
+  .collapsible-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    background: transparent;
+    border: none;
+    padding: var(--space-3);
+    text-align: left;
+    font-weight: 600;
+  }
+
+  .collapsible-count {
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+
+  .collapsible-body {
+    margin: 0 var(--space-3) var(--space-3);
   }
 
   .tab-content {

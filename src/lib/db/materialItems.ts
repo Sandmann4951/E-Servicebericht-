@@ -13,6 +13,8 @@ export interface MaterialItemInput {
   plannedQuantity?: number;
   /** Siehe MaterialItem.source. */
   source?: MaterialItem['source'];
+  /** Siehe MaterialItem.quantityConfirmed. */
+  quantityConfirmed?: boolean;
 }
 
 /** Materialpositionen eines Berichts, in Erfassungsreihenfolge. */
@@ -34,6 +36,7 @@ export async function addMaterialItem(reportId: ID, input: MaterialItemInput): P
     articleNumber: input.articleNumber?.trim() || undefined,
     plannedQuantity: input.plannedQuantity,
     source: input.source,
+    quantityConfirmed: input.quantityConfirmed || undefined,
     createdAt: now,
     updatedAt: now
   };

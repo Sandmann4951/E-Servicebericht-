@@ -1,6 +1,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { DB_NAME, DB_VERSION, type ServiceBerichtDB } from './types';
 import { computeDurationMinutes } from '../utils/date';
+import { formatTimeEntryPerformedWorkLine } from '../utils/performedWorkNote';
 
 let dbPromise: Promise<IDBPDatabase<ServiceBerichtDB>> | undefined;
 
@@ -115,6 +116,21 @@ export function getDB(): Promise<IDBPDatabase<ServiceBerichtDB>> {
               createdAt: plan.createdAt,
               updatedAt: plan.updatedAt
             });
+          }
+        }
+        if (oldVersion < 7) {
+          // Zeiteintrag-Notizen werden ab jetzt laufend mit "Durchgeführte
+          // Arbeiten" abgeglichen (siehe performedWorkSync.ts). Bisher wurde
+          // eine Notiz beim ersten Ausfüllen einmalig dort angehängt - alle
+          // bestehenden Notizen gelten deshalb als bereits geschrieben, sonst
+          // würde der erste Abgleich sie ein zweites Mal anhängen.
+          let cursor = await transaction.objectStore('timeEntries').openCursor();
+          while (cursor) {
+            const entry = cursor.value;
+            if (entry.reportId && entry.note?.trim() && entry.performedWorkLine === undefined) {
+              await cursor.update({ ...entry, performedWorkLine: formatTimeEntryPerformedWorkLine(entry, entry.note) });
+            }
+            cursor = await cursor.continue();
           }
         }
       }

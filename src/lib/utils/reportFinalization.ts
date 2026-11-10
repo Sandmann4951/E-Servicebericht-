@@ -9,7 +9,7 @@ import type { ServiceReport } from '../db/types';
  * rückwirkend ungültig - die Prüfung greift nur beim Abschließen selbst,
  * nie beim Laden/Anzeigen eines Berichts.
  */
-type RequiredFieldKey = 'plantStatus' | 'securityEquipmentOk' | 'followUpVisitNeeded';
+export type RequiredFieldKey = 'plantStatus' | 'securityEquipmentOk' | 'followUpVisitNeeded';
 
 const REQUIRED_FIELDS_FOR_FINALIZE: { key: RequiredFieldKey; label: string }[] = [
   { key: 'plantStatus', label: 'Anlagenstatus' },
@@ -20,4 +20,9 @@ const REQUIRED_FIELDS_FOR_FINALIZE: { key: RequiredFieldKey; label: string }[] =
 /** Liste der fehlenden Pflichtfelder (als Anzeige-Label), leer wenn alle gesetzt sind. */
 export function missingRequiredFieldsForFinalize(values: Pick<ServiceReport, RequiredFieldKey>): string[] {
   return REQUIRED_FIELDS_FOR_FINALIZE.filter(({ key }) => values[key] === undefined).map(({ label }) => label);
+}
+
+/** Wie missingRequiredFieldsForFinalize(), aber als Feld-Schlüssel - für den Abschluss-Assistenten, der die fehlenden Felder direkt abfragt. */
+export function missingRequiredFieldKeys(values: Pick<ServiceReport, RequiredFieldKey>): RequiredFieldKey[] {
+  return REQUIRED_FIELDS_FOR_FINALIZE.filter(({ key }) => values[key] === undefined).map(({ key }) => key);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { missingRequiredFieldsForFinalize } from '../../lib/utils/reportFinalization';
+import { missingRequiredFieldKeys, missingRequiredFieldsForFinalize } from '../../lib/utils/reportFinalization';
 
 describe('missingRequiredFieldsForFinalize', () => {
   it('listet alle drei Pflichtfelder, wenn keines gesetzt ist', () => {
@@ -27,5 +27,13 @@ describe('missingRequiredFieldsForFinalize', () => {
       followUpVisitNeeded: false
     });
     expect(missing).toEqual([]);
+  });
+});
+
+describe('missingRequiredFieldKeys', () => {
+  it('liefert die Schlüssel der noch nicht beantworteten Pflichtfelder (false zählt als beantwortet)', () => {
+    expect(
+      missingRequiredFieldKeys({ plantStatus: undefined, securityEquipmentOk: false, followUpVisitNeeded: undefined })
+    ).toEqual(['plantStatus', 'followUpVisitNeeded']);
   });
 });

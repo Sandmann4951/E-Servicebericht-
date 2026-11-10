@@ -1,33 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  appendPerformedWorkLine,
-  formatTimeEntryPerformedWorkLine,
-  shouldAppendPerformedWorkLine
-} from '../../lib/utils/performedWorkNote';
-
-describe('shouldAppendPerformedWorkLine', () => {
-  it('hängt an, wenn eine bisher leere Notiz erstmalig ausgefüllt wird (neuer Eintrag)', () => {
-    expect(shouldAppendPerformedWorkLine(undefined, 'Sicherung ersetzt')).toBe(true);
-  });
-
-  it('hängt an, wenn eine bestehende, bisher leere Notiz erstmalig ausgefüllt wird', () => {
-    expect(shouldAppendPerformedWorkLine('', 'Sicherung ersetzt')).toBe(true);
-  });
-
-  it('hängt NICHT an, wenn eine bereits gesetzte Notiz lediglich geändert wird (z.B. Tippfehler-Korrektur)', () => {
-    expect(shouldAppendPerformedWorkLine('Sicherung ersetzt', 'Sicherung ersetzt (korrigiert)')).toBe(false);
-  });
-
-  it('hängt NICHT an, wenn die Notiz unverändert bleibt', () => {
-    expect(shouldAppendPerformedWorkLine('Sicherung ersetzt', 'Sicherung ersetzt')).toBe(false);
-  });
-
-  it('hängt NICHT an, wenn die neue Notiz leer ist (Notiz wird gelöscht statt ausgefüllt)', () => {
-    expect(shouldAppendPerformedWorkLine('Sicherung ersetzt', '')).toBe(false);
-    expect(shouldAppendPerformedWorkLine(undefined, '')).toBe(false);
-    expect(shouldAppendPerformedWorkLine(undefined, '   ')).toBe(false);
-  });
-});
+import { appendPerformedWorkLine, applyNoteLine, formatTimeEntryPerformedWorkLine } from '../../lib/utils/performedWorkNote';
 
 describe('formatTimeEntryPerformedWorkLine', () => {
   it('formatiert Datum, Zeitspanne und Notiz-Text', () => {
@@ -61,5 +33,44 @@ describe('appendPerformedWorkLine', () => {
     expect(performedWork).toBe(
       '09.08.2026, 08:00–12:00: Erste Notiz\n10.08.2026, 08:00–12:00: Zweite Notiz\n11.08.2026, 08:00–12:00: Dritte Notiz'
     );
+  });
+});
+
+describe('applyNoteLine', () => {
+  const OLD = '10.08.2026: Sicherung ersetzt';
+  const NEW = '10.08.2026, 08:00–12:00: Sicherung ersetzt';
+
+  it('hängt eine noch nie geschriebene Zeile an', () => {
+    expect(applyNoteLine('Zählerschrank geprüft.', undefined, NEW)).toBe(`Zählerschrank geprüft.\n${NEW}`);
+    expect(applyNoteLine(undefined, undefined, NEW)).toBe(NEW);
+  });
+
+  it('hängt nicht doppelt an, wenn genau diese Zeile schon dasteht (z.B. alte Sicherung wiederhergestellt)', () => {
+    expect(applyNoteLine(`Vorher\n${NEW}`, undefined, NEW)).toBe(`Vorher\n${NEW}`);
+  });
+
+  it('ersetzt die bisherige Zeile an Ort und Stelle (laufender Abschnitt wurde ausgecheckt)', () => {
+    expect(applyNoteLine(`Vorher\n${OLD}\nNachher`, OLD, NEW)).toBe(`Vorher\n${NEW}\nNachher`);
+  });
+
+  it('entfernt die Zeile, wenn die Notiz geleert wurde', () => {
+    expect(applyNoteLine(`Vorher\n${OLD}`, OLD, undefined)).toBe('Vorher');
+    expect(applyNoteLine(OLD, OLD, undefined)).toBe('');
+  });
+
+  it('lässt von Hand umformulierten Text unangetastet', () => {
+    const edited = 'Sicherung im Zählerschrank getauscht (von Hand umformuliert)';
+    expect(applyNoteLine(edited, OLD, NEW)).toBe(edited);
+    expect(applyNoteLine(edited, OLD, undefined)).toBe(edited);
+  });
+
+  it('ändert nichts, wenn alte und neue Zeile gleich sind', () => {
+    expect(applyNoteLine(`A\n${OLD}`, OLD, OLD)).toBe(`A\n${OLD}`);
+  });
+});
+
+describe('formatTimeEntryPerformedWorkLine - Zeilenumbrüche', () => {
+  it('macht aus einer mehrzeiligen Notiz eine einzige Zeile', () => {
+    expect(formatTimeEntryPerformedWorkLine({ date: '2026-08-10' }, 'Erste Zeile\nZweite Zeile')).toBe('10.08.2026: Erste Zeile Zweite Zeile');
   });
 });

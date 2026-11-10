@@ -6,6 +6,7 @@
   import { parseLabelText } from '../utils/labelOcr';
   import { parseDeliveryNoteText } from '../utils/deliveryNoteOcr';
   import { isMaterialItemFullyReported } from '../export/exportScope';
+  import { formatPlanDeviation, materialPlanStatus, stepQuantity, summarizeMaterialPlan } from '../utils/materialPlan';
   import Icon from './Icon.svelte';
   import BarcodeScanner from './BarcodeScanner.svelte';
 
@@ -240,7 +241,8 @@
   async function save(): Promise<void> {
     const description = formDescription.trim();
     const quantity = Number(formQuantity.replace(',', '.'));
-    if (!description || !Number.isFinite(quantity) || quantity <= 0) return;
+    // Menge 0 nur bei Positionen mit Soll erlaubt ("geplant, aber nicht verbaut").
+    if (!description || !Number.isFinite(quantity) || quantity < 0 || (quantity === 0 && !formHasPlannedQuantity)) return;
 
     const trimmedPlanned = formHasPlannedQuantity ? formPlannedQuantity.trim() : '';
     const plannedQuantity = trimmedPlanned ? Number(trimmedPlanned.replace(',', '.')) : undefined;
@@ -254,7 +256,8 @@
       source: formSource
     };
     if (editingId) {
-      await updateMaterialItem(editingId, payload);
+      // Wer die Menge einer geplanten Position von Hand speichert, hat sie damit bestätigt.
+      await updateMaterialItem(editingId, formHasPlannedQuantity ? { ...payload, quantityConfirmed: true } : payload);
     } else {
       await addMaterialItem(reportId, payload);
     }
@@ -269,6 +272,35 @@
     if (editingId === item.id) resetForm();
     await load();
     onChanged();
+  }
+
+  // Soll/Ist-Abgleich mit dem Serviceauftrag direkt in der Liste (siehe
+  // utils/materialPlan.ts) - ohne die Position dafür öffnen zu müssen.
+  const planSummary = $derived(summarizeMaterialPlan(items));
+
+  async function applyPlanChange(item: MaterialItem, patch: { quantity?: number; quantityConfirmed: boolean }): Promise<void> {
+    const updated = await updateMaterialItem(item.id, patch);
+    if (!updated) return;
+    items = items.map((other) => (other.id === item.id ? updated : other));
+    onChanged();
+  }
+
+  /** Plus/Minus: passt die verbaute Menge an und gilt damit als bestätigt. */
+  function stepItem(item: MaterialItem, direction: 1 | -1): Promise<void> {
+    return applyPlanChange(item, { quantity: stepQuantity(item.quantity, direction), quantityConfirmed: true });
+  }
+
+  /** Haken: "wie geplant verbaut" - erneutes Antippen nimmt die Bestätigung zurück. */
+  function togglePlanned(item: MaterialItem): Promise<void> {
+    if (materialPlanStatus(item) === 'ok') return applyPlanChange(item, { quantityConfirmed: false });
+    return applyPlanChange(item, { quantity: item.plannedQuantity, quantityConfirmed: true });
+  }
+
+  function planLabel(item: MaterialItem): string {
+    const status = materialPlanStatus(item);
+    if (status === 'ok') return 'wie geplant';
+    if (status === 'diff') return `Abweichung ${formatPlanDeviation(item)}`;
+    return 'noch offen';
   }
 
   /** "4 Stk · geplant 5 Stk · Art.-Nr. ... · L" - die geplante Menge (falls per Serviceauftrag-Import gesetzt) nur zum Abgleich, keine eigene Validierung. */
@@ -302,6 +334,11 @@
     {#if items.length === 0 && !showForm}
       <p class="hint">Noch kein Material erfasst.</p>
     {/if}
+    {#if planSummary.planned > 0}
+      <p class="plan-summary">
+        Abgleich mit Serviceauftrag: <strong>{planSummary.ok + planSummary.diff} von {planSummary.planned}</strong> bestätigt{#if planSummary.diff > 0}{' '}· {planSummary.diff} {planSummary.diff === 1 ? 'Abweichung' : 'Abweichungen'}{/if}
+      </p>
+    {/if}
     {#if items.length > 0}
       <ul class="list">
         {#each items as item (item.id)}
@@ -316,7 +353,8 @@
           {:else}
             {@const hint = reportedHint(item)}
             {@const fullyReported = isMaterialItemFullyReported(item) && !!item.reportedQuantity}
-            <li class="row" class:reported={fullyReported}>
+            {@const planStatus = materialPlanStatus(item)}
+            <li class="row" class:reported={fullyReported} class:has-plan={planStatus !== 'none'}>
               {#if locked}
                 <div class="row-main">
                   <span class="desc">{item.description}</span>
@@ -332,6 +370,28 @@
                 <button type="button" class="delete" aria-label="Position löschen" onclick={() => remove(item)}>
                   <Icon name="trash" />
                 </button>
+              {/if}
+              {#if planStatus !== 'none'}
+                <div class="plan-bar plan-{planStatus}">
+                  <span class="plan-status">{planLabel(item)}</span>
+                  {#if !locked}
+                    <div class="plan-controls">
+                      <button type="button" class="step" aria-label="Menge verringern" disabled={item.quantity <= 0} onclick={() => stepItem(item, -1)}>−</button>
+                      <span class="plan-quantity">{String(item.quantity).replace('.', ',')}</span>
+                      <button type="button" class="step" aria-label="Menge erhöhen" onclick={() => stepItem(item, 1)}>+</button>
+                      <button
+                        type="button"
+                        class="plan-check"
+                        class:active={planStatus === 'ok'}
+                        aria-pressed={planStatus === 'ok'}
+                        aria-label="Wie geplant verbaut"
+                        onclick={() => togglePlanned(item)}
+                      >
+                        <Icon name="check" size={16} />
+                      </button>
+                    </div>
+                  {/if}
+                </div>
               {/if}
             </li>
           {/if}
@@ -527,6 +587,97 @@
      Fehlerzustand. */
   .row.reported {
     opacity: 0.6;
+  }
+
+  .plan-summary {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+
+  .plan-summary strong {
+    color: var(--color-text);
+  }
+
+  /* Positionen mit Soll aus dem Serviceauftrag bekommen eine zweite Zeile
+     für den Soll/Ist-Abgleich (Status + Plus/Minus + Haken). */
+  .row.has-plan {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .row.has-plan .row-main {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .plan-bar {
+    flex: 0 0 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--color-border);
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  .plan-bar.plan-ok {
+    background: color-mix(in srgb, var(--color-success) 14%, transparent);
+    color: var(--color-success);
+  }
+
+  .plan-bar.plan-diff {
+    background: var(--color-open-bg);
+    color: var(--color-open);
+  }
+
+  .plan-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .plan-controls .step,
+  .plan-check {
+    width: 40px;
+    height: 40px;
+    min-height: auto;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+
+  .plan-controls .step:disabled {
+    opacity: 0.4;
+  }
+
+  .plan-quantity {
+    min-width: 2.5em;
+    text-align: center;
+    font-size: 0.95rem;
+    color: var(--color-text);
+  }
+
+  .plan-check {
+    margin-left: var(--space-2);
+    color: var(--color-text-muted);
+  }
+
+  .plan-check.active {
+    background: var(--color-success);
+    border-color: var(--color-success);
+    color: var(--color-primary-contrast);
   }
 
   .reported-hint {

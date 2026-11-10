@@ -260,3 +260,16 @@ a {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Textfeld mit Diktier-Knopf (DictateButton.svelte): der Knopf sitzt rechts
+   oben auf Höhe der Feldbeschriftung, bewusst AUSSERHALB des <label> - als
+   Kind des Labels würde ein Tipp auf die Beschriftung das Diktat starten. */
+.dictate-field {
+  position: relative;
+}
+
+.dictate-field .dictate-btn {
+  position: absolute;
+  top: -6px;
+  right: 0;
+}

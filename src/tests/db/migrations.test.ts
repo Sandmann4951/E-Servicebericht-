@@ -209,3 +209,80 @@ describe('v5 -> v6 Migration: dayProjectPlans von "ein Eintrag pro Tag" (keyPath
     expect(await listAllDayProjectPlans()).toEqual([]);
   });
 });
+
+describe('v6 -> v7 Migration: bestehende Zeiteintrag-Notizen gelten als bereits in "Durchgeführte Arbeiten" geschrieben', () => {
+  it('hängt eine früher schon einmal angehängte Notiz beim ersten Abgleich nicht ein zweites Mal an', async () => {
+    const now = new Date().toISOString();
+    const alreadyThere = '10.08.2026, 08:00–12:00: Sicherung ersetzt';
+
+    const setupDb = await openDB(DB_NAME, 6, {
+      upgrade(db) {
+        const reports = db.createObjectStore('reports', { keyPath: 'id' });
+        reports.createIndex('projectNumber', 'projectNumber');
+        reports.createIndex('status', 'status');
+        reports.createIndex('updatedAt', 'updatedAt');
+
+        const timeEntries = db.createObjectStore('timeEntries', { keyPath: 'id' });
+        timeEntries.createIndex('reportId', 'reportId');
+        timeEntries.createIndex('date', 'date');
+        timeEntries.createIndex('workDayId', 'workDayId');
+
+        db.createObjectStore('materialItems', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+        db.createObjectStore('photos', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+        db.createObjectStore('workDays', { keyPath: 'id' }).createIndex('date', 'date');
+        db.createObjectStore('absences', { keyPath: 'date' });
+        db.createObjectStore('dayProjectPlans', { keyPath: 'id' }).createIndex('date', 'date');
+      }
+    });
+
+    await setupDb.put('reports', {
+      id: 'r1',
+      projectNumber: 'A',
+      status: 'open',
+      // Vom Monteur nachträglich um eine Uhrzeit-Korrektur ergänzt - die
+      // Zeile der zweiten Notiz steht deshalb nicht mehr wortgleich da.
+      performedWork: `${alreadyThere}\n11.08.2026: Inbetriebnahme (von Hand angepasst)`,
+      timeEntryCount: 2,
+      totalDurationMinutes: 480,
+      materialItemCount: 0,
+      photoCount: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+    await setupDb.put('timeEntries', {
+      id: 'e1',
+      reportId: 'r1',
+      date: '2026-08-10',
+      startTime: '08:00',
+      endTime: '12:00',
+      durationMinutes: 240,
+      note: 'Sicherung ersetzt',
+      createdAt: now,
+      updatedAt: now
+    });
+    await setupDb.put('timeEntries', {
+      id: 'e2',
+      reportId: 'r1',
+      date: '2026-08-11',
+      startTime: '08:00',
+      endTime: '12:00',
+      durationMinutes: 240,
+      note: 'Inbetriebnahme',
+      createdAt: now,
+      updatedAt: now
+    });
+    setupDb.close();
+
+    await getDB();
+
+    const entries = await listTimeEntries('r1');
+    expect(entries.map((entry) => entry.performedWorkLine)).toEqual([
+      alreadyThere,
+      '11.08.2026, 08:00–12:00: Inbetriebnahme'
+    ]);
+
+    const { syncPerformedWorkFromNotes } = await import('../../lib/db/performedWorkSync');
+    await syncPerformedWorkFromNotes('r1');
+    expect((await getReport('r1'))?.performedWork).toBe(`${alreadyThere}\n11.08.2026: Inbetriebnahme (von Hand angepasst)`);
+  });
+});
