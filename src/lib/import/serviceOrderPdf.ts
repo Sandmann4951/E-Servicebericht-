@@ -265,8 +265,21 @@ function isPositionedTextItem(item: unknown): item is PositionedTextItem {
 }
 
 /** Gruppiert Text-Fragmente zu Zeilen (siehe Dateikommentar oben), oben nach unten, je Zeile links nach rechts. */
-function linesFromTextContent(items: unknown[]): string[] {
-  const positioned = items.filter(isPositionedTextItem);
+export function linesFromTextContent(items: unknown[]): string[] {
+  // Manche Serviceaufträge enthalten denselben Text zweimal exakt übereinander
+  // (z.B. aus einem eingebetteten Angebot) - die zweite Kopie würde jede Zeile
+  // verdoppeln ("1,01,0StkStk...") und so jede Erkennung verhindern.
+  const positioned = items.filter(isPositionedTextItem).filter(
+    (item, index, all) =>
+      !all
+        .slice(0, index)
+        .some(
+          (earlier) =>
+            earlier.str === item.str &&
+            Math.abs(earlier.transform[4] - item.transform[4]) < 1 &&
+            Math.abs(earlier.transform[5] - item.transform[5]) < 1
+        )
+  );
   const Y_TOLERANCE = 2;
   const buckets: { y: number; items: PositionedTextItem[] }[] = [];
   for (const item of positioned) {

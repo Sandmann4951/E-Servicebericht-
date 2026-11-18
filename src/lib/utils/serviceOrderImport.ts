@@ -77,7 +77,7 @@ export interface ParsedServiceOrder {
 // Schreibweisen zuerst in der Alternative, damit z.B. "Std." nicht schon
 // durch "Std" ohne den Punkt "abgeschnitten" wird (der Punkt würde sonst in
 // der Beschreibung hängen bleiben).
-const KNOWN_UNITS = ['Stück', 'Pauschale', 'Pau', 'Std\\.', 'Stck', 'Std', 'lfm', 'Set', 'Pkg', 'kg', 'm'];
+const KNOWN_UNITS = ['Stück', 'Pauschale', 'Pau', 'Std\\.', 'Stck', 'Stk', 'Std', 'lfm', 'Set', 'Pkg', 'kg', 'm'];
 const UNIT_PATTERN = KNOWN_UNITS.join('|');
 
 // z.B. "1.0104mLeitungsführungskanal LF 15x15 vw" -> Pos. "1.010", Menge "4", Einheit "m", Text "...".
@@ -109,6 +109,23 @@ const SECTION_HEADER_LINE = /^(\d+)\s*([A-Za-zÄÖÜäöüß].*)$/;
 // exakt die letzten 7 Ziffern als Artikelnummer isolieren, unabhängig davon,
 // was davor steht.
 const ARTICLE_NUMBER_SUFFIX = /^(.*?)(\d{7})$/;
+
+// Zweite Tabellenform, wenn ein Angebot in den Serviceauftrag übernommen
+// wurde (echtes Beispiel Dok-Nr. 266056): dreistellige Position OHNE Punkt
+// ("010", "150", "240"). Steht direkt eine Einheit dahinter, ist es eine
+// eigene Position ("1501Stückgo-e Charger" = Pos. 150, 1 Stück) ...
+const ANGEBOT_ITEM_LINE = new RegExp(`^(\\d{3})\\s*(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_PATTERN})\\s*(.+)$`);
+// ... ohne Einheit eine Gruppe ("0101Lastmanagement" = Pos. 010, Menge 1),
+// deren eigentliche Positionen erst in der Text-Spalte darunter stehen:
+const ANGEBOT_GROUP_LINE = /^(\d{3})\s*\d+\s*([A-Za-zÄÖÜäöüß].*)$/;
+// z.B. "1,0StkEnergiezähler liefern" oder "10 StkAnreisepauschale inkl.".
+const ANGEBOT_NESTED_LINE = new RegExp(`^(\\d+(?:[.,]\\d+)?)\\s*(${UNIT_PATTERN})\\s*(.+)$`);
+// Leitet jeden übernommenen Angebotsblock ein - erst danach wird die
+// Angebots-Tabellenform überhaupt gesucht, damit eine Fortsetzungszeile im
+// üblichen Format (z.B. "1000mm ...") nie als Gruppe missverstanden wird.
+const ANGEBOT_MARKER_LINE = /^Angebot\s*\d+$/i;
+// Gruppen, deren Positionen Dienstleistungen statt Material sind.
+const LABOR_GROUP_TITLE = /arbeitsaufwand|lohn|reise|projektmanagement/i;
 
 const TABLE_HEADER_LINE = /^Pos\.?\s*Menge\s*Ein\.?\s*Text/i;
 const PAGE_FOOTER_LINE = /^Seite\s+\d+\s+von\s+\d+$/i;
@@ -229,8 +246,44 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
   // fälschlich als neuer Abschnitt erkannt - inkl. Reset von currentMaterial,
   // wodurch der Rest der Beschreibung stillschweigend verloren ginge.
   let nextSectionNumber = 1;
+  // Nur für die Angebots-Tabellenform (siehe ANGEBOT_*): Positionen laufen
+  // dort in Zehnerschritten aufsteigend - eine kleinere oder unrunde Zahl
+  // ist keine Position, sondern Teil der Text-Spalte.
+  let lastAngebotPosition = 0;
+  let inAngebotGroup = false;
+  let angebotMode = false;
 
-  for (const line of lines) {
+  function addLine(quantityText: string, unitText: string, description: string, asLabor: boolean): void {
+    const quantity = toPositiveNumber(quantityText);
+    const text = description.trim();
+    if (quantity === undefined || !text) return;
+    const unit = normalizeUnit(unitText);
+    if (asLabor || unit === 'Std') {
+      laborLines.push(`${quantityText} ${unit} ${text}`.trim());
+      currentLaborIndex = laborLines.length - 1;
+      currentMaterial = undefined;
+      if (unit === 'Std') plannedLaborHoursSum += quantity;
+      return;
+    }
+    const artMatch = ARTICLE_NUMBER_SUFFIX.exec(text);
+    const hasArticleNumber = artMatch && artMatch[1].trim();
+    currentMaterial = hasArticleNumber
+      ? { description: artMatch[1].trim(), quantity, unit, articleNumber: artMatch[2] }
+      : { description: text, quantity, unit };
+    materials.push(currentMaterial);
+    currentLaborIndex = undefined;
+  }
+
+  function isNextAngebotPosition(position: string): boolean {
+    const value = Number(position);
+    if (value % 10 !== 0 || value <= lastAngebotPosition) return false;
+    lastAngebotPosition = value;
+    return true;
+  }
+
+  for (const rawLine of lines) {
+    // Aufzählungszeichen aus der Text-Spalte ("∂", "•") tragen keinen Inhalt.
+    const line = rawLine.replace(/^[∂•·▪]\s*/, '');
     if (TABLE_HEADER_LINE.test(line)) {
       // NUR den Tabellen-Modus aktivieren - bewusst NICHT currentMaterial/
       // currentLaborIndex zurücksetzen: dieselbe Kopfzeile taucht auf JEDER
@@ -247,25 +300,42 @@ export function parseServiceOrderText(rawText: string): ParsedServiceOrder {
     const itemMatch = ITEM_LINE.exec(line);
     if (itemMatch) {
       const [, quantityText, unitText, description] = itemMatch;
-      const quantity = toPositiveNumber(quantityText);
-      const text = description.trim();
-      if (quantity === undefined || !text) continue;
-      const unit = normalizeUnit(unitText);
-      if (section === 'labor') {
-        laborLines.push(`${quantityText} ${unit} ${text}`.trim());
-        currentLaborIndex = laborLines.length - 1;
-        currentMaterial = undefined;
-        if (unit === 'Std') plannedLaborHoursSum += quantity;
-      } else {
-        const artMatch = ARTICLE_NUMBER_SUFFIX.exec(text);
-        const hasArticleNumber = artMatch && artMatch[1].trim();
-        currentMaterial = hasArticleNumber
-          ? { description: artMatch[1].trim(), quantity, unit, articleNumber: artMatch[2] }
-          : { description: text, quantity, unit };
-        materials.push(currentMaterial);
-        currentLaborIndex = undefined;
-      }
+      // Std-Positionen sind auch außerhalb eines Lohn-Abschnitts Zeit, kein Material.
+      addLine(quantityText, unitText, description, section === 'labor');
       continue;
+    }
+
+    if (ANGEBOT_MARKER_LINE.test(line)) {
+      angebotMode = true;
+      currentMaterial = undefined;
+      currentLaborIndex = undefined;
+      inAngebotGroup = false;
+      continue;
+    }
+
+    const angebotItem = angebotMode ? ANGEBOT_ITEM_LINE.exec(line) : null;
+    if (angebotItem && isNextAngebotPosition(angebotItem[1])) {
+      inAngebotGroup = false;
+      section = 'material';
+      addLine(angebotItem[2], angebotItem[3], angebotItem[4], false);
+      continue;
+    }
+
+    const angebotGroup = angebotMode ? ANGEBOT_GROUP_LINE.exec(line) : null;
+    if (angebotGroup && isNextAngebotPosition(angebotGroup[1])) {
+      inAngebotGroup = true;
+      section = LABOR_GROUP_TITLE.test(angebotGroup[2]) ? 'labor' : 'material';
+      currentMaterial = undefined;
+      currentLaborIndex = undefined;
+      continue;
+    }
+
+    if (inAngebotGroup) {
+      const nested = ANGEBOT_NESTED_LINE.exec(line);
+      if (nested) {
+        addLine(nested[1], nested[2], nested[3], section === 'labor');
+        continue;
+      }
     }
 
     const sectionMatch = SECTION_HEADER_LINE.exec(line);
