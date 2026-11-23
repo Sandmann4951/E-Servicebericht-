@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { buildReportDocx, suggestedFileName } from '../../lib/export/docxExport';
 import type { FullReport } from '../../lib/export/getFullReport';
 import type { MaterialItem, Photo, ServiceReport, TimeEntry } from '../../lib/db/types';
+import { jpegWithExifDate } from '../utils/exifFixture';
 
 const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -311,30 +312,65 @@ describe('buildReportDocx', () => {
     const xml = await zip.file('word/document.xml')!.async('text');
     expect(xml).toContain('r:embed="rIdPhoto0"');
     expect(xml).toContain('r:embed="rIdPhoto1"');
-    // Fuer die restlichen 8 (unbefuellten) Dokumentations-Zeilen bleibt das
-    // Platzhalterbild der Vorlage unveraendert bestehen.
-    expect(xml.match(/r:embed="rId22"/g)?.length).toBe(8);
+    // Die restlichen 8 (unbefuellten) Dokumentations-Zeilen verlieren das Platzhalterbild.
+    expect(xml.match(/r:embed="rId22"/g)).toBeNull();
   });
 
-  it('zeigt in der "Beschreibung"-Spalte die eigene Foto-Notiz statt des Zeitstempels', async () => {
+  it('zeigt in der "Beschreibung"-Spalte den Upload-Zeitpunkt und darunter die eigene Foto-Notiz', async () => {
     const blob = await build(
       fakeFullReport({
-        // Ohne Zeiteinträge, damit das Datum nicht über die Zeiten-Tabelle ins Dokument kommt.
         timeEntries: [],
         photos: [fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: 'Sicherung vor dem Austausch' })]
       })
     );
     const xml = await documentXmlOf(blob);
-    expect(xml).toContain('Sicherung vor dem Austausch');
-    expect(xml).not.toContain('10.08.2026');
+    // 09:15 UTC = 11:15 Uhr deutsche Sommerzeit.
+    expect(xml).toMatch(
+      /Upload: 10\.08\.2026, 11:15 Uhr<\/w:t><\/w:r><w:r><w:br\/><\/w:r><w:r>(?:(?!<\/w:r>).)*Sicherung vor dem Austausch/
+    );
   });
 
-  it('lässt die "Beschreibung"-Spalte ohne eigene Foto-Notiz bewusst leer (kein Zeitstempel-Fallback)', async () => {
+  it('nimmt das EXIF-Aufnahmedatum der Originaldatei statt der Upload-Zeit, wenn vorhanden', async () => {
+    const blob = await build(
+      fakeFullReport({
+        timeEntries: [],
+        photos: [
+          fakePhoto({
+            id: 'p1',
+            takenAt: '2026-08-12T15:00:00.000Z',
+            blob: new Blob([jpegWithExifDate('2026:08:10 07:42:10')], { type: 'image/jpeg' })
+          })
+        ]
+      })
+    );
+    const xml = await documentXmlOf(blob);
+    expect(xml).toContain('Aufnahme: 10.08.2026, 07:42 Uhr');
+    expect(xml).not.toContain('Upload:');
+  });
+
+  it('zeigt ohne eigene Foto-Notiz nur den Zeitstempel', async () => {
     const blob = await build(
       fakeFullReport({ timeEntries: [], photos: [fakePhoto({ id: 'p1', takenAt: '2026-08-10T09:15:00.000Z', note: undefined })] })
     );
     const xml = await documentXmlOf(blob);
-    expect(xml).not.toContain('10.08.2026');
+    expect(xml).toContain('Upload: 10.08.2026, 11:15 Uhr</w:t>');
+    expect(xml).not.toMatch(/11:15 Uhr<\/w:t><\/w:r><w:r><w:br\/>/);
+  });
+
+  it('entfernt die Bild-Inhaltssteuerungen und verbreitert die Bild-Spalte', async () => {
+    const blob = await build(fakeFullReport({ photos: [fakePhoto()] }));
+    const xml = await documentXmlOf(blob);
+    expect(xml).not.toContain('<w:picture/>');
+    const tagIndex = xml.indexOf('r:embed="rIdPhoto0"');
+    const table = xml.slice(xml.lastIndexOf('<w:tbl>', tagIndex), xml.indexOf('</w:tbl>', tagIndex));
+    expect(table.match(/<w:gridCol w:w="(\d+)"\/>/g)).toEqual([
+      '<w:gridCol w:w="700"/>',
+      '<w:gridCol w:w="3600"/>',
+      '<w:gridCol w:w="5702"/>'
+    ]);
+    expect(table).not.toContain('<w:tcW w:w="2953" w:type="dxa"/>');
+    // 800x600 -> auf 350px Breite skaliert (350 x 263 px).
+    expect(table).toContain(`<wp:extent cx="${350 * 9525}" cy="${263 * 9525}"/>`);
   });
 
   it('nimmt per excludeFromReport ausgeschlossene Fotos nicht in die Dokumentations-Tabelle auf', async () => {
@@ -354,11 +390,10 @@ describe('buildReportDocx', () => {
     const xml = await zip.file('word/document.xml')!.async('text');
     expect(xml).toContain('Sicherung vor dem Austausch');
     expect(xml).not.toContain('Nur für intern');
-    // Die restlichen 9 Dokumentations-Zeilen (10 - 1 eingebettetes Foto) behalten das Platzhalterbild.
-    expect(xml.match(/r:embed="rId22"/g)?.length).toBe(9);
+    expect(xml.match(/r:embed="rId22"/g)).toBeNull();
   });
 
-  it('exportiert ganz normal, wenn alle Fotos ausgeschlossen sind (keine Bilder, Platzhalter bleiben überall)', async () => {
+  it('exportiert ganz normal, wenn alle Fotos ausgeschlossen sind (keine Bilder, keine Platzhalter)', async () => {
     const blob = await build(
       fakeFullReport({
         photos: [fakePhoto({ id: 'p1', excludeFromReport: true })]
@@ -368,7 +403,7 @@ describe('buildReportDocx', () => {
     const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith('word/media/photo'));
     expect(mediaFiles).toHaveLength(0);
     const xml = await zip.file('word/document.xml')!.async('text');
-    expect(xml.match(/r:embed="rId22"/g)?.length).toBe(10);
+    expect(xml.match(/r:embed="rId22"/g)).toBeNull();
   });
 
   describe('weitere ELSA-Vorlagenfelder (Objektadresse, E-Mail, Bestellnummer, Mehrungen, Mängel, Angebot, Status-Auswahlen)', () => {
@@ -493,7 +528,7 @@ describe('buildReportDocx', () => {
     const blob = await build(fakeFullReport({ photos: [fakePhoto()] }));
     const xml = await documentXmlOf(blob);
     expect(xml).not.toContain('<w:t>11</w:t>');
-    expect(xml.match(/r:embed="rId22"/g)).toHaveLength(9);
+    expect(xml.match(/r:embed="rId22"/g)).toBeNull();
   });
 
   it('traegt bei einer Kunden-Unterschrift den gedruckten Namen UND das tatsaechliche Unterschriftsbild ein (neue DrawingML-Einfuegung, da die Vorlage dafuer urspruenglich keinen Platzhalter vorsieht)', async () => {

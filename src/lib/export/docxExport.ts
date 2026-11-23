@@ -4,6 +4,8 @@ import templateUrl from '../../assets/templates/servicebericht-vorlage.docx';
 import type { MaterialItem, Photo, ServiceReport } from '../db/types';
 import { splitContactPersonAndPhone } from '../utils/contactPerson';
 import { formatDateDE, todayISODate } from '../utils/date';
+import { readExifCaptureDateFromBlob } from '../utils/exifDate';
+import { createExportImage } from '../utils/image';
 import type { FullReport } from './getFullReport';
 import { buildTimesheetRows } from './timesheetRows';
 
@@ -57,6 +59,16 @@ import { buildTimesheetRows } from './timesheetRows';
  * für die Darstellung per Regex und trennt es wieder auf, OHNE die
  * gespeicherten Daten selbst zu verändern.
  *
+ * FOTOS - LAYOUT (Nutzerwunsch): prepareDocumentationTable() entfernt vor dem
+ * Rendern die Word-"Bild-Inhaltssteuerung" um jede Foto-Zelle (sonst öffnet
+ * Word Desktop beim Klick aufs Foto "Bild einfügen" statt das Bild zu
+ * markieren) und verteilt die Spaltenbreiten neu - schmale Nr.-Spalte,
+ * kleinere Beschreibung, breite Bild-Spalte, ähnlich der Fotoliste in der
+ * App. Die Beschreibung beginnt mit dem Zeitpunkt des Fotos (EXIF-
+ * Aufnahmedatum, sonst Upload-Zeit, siehe photoTimestampLabel()), damit
+ * Vorher-/Nachher-Fotos verschiedener Einsätze zeitlich zuordenbar sind.
+ * Nicht belegte Zeilen verlieren das Platzhalterbild (bleiben leer).
+ *
  * FOTOS - EIGENER WEG, KEIN BILD-MODUL: Jede der 10 nummerierten
  * Dokumentations-Zeilen (1.-10.; bei mehr Fotos werden weitere Zeilen nach
  * dem Muster der 10. angehängt, siehe expandPhotoRows()) hat in der Originaldatei bereits eine eigene, vom
@@ -78,15 +90,11 @@ import { buildTimesheetRows } from './timesheetRows';
  * in `word/media/`, Eintrag in `word/_rels/document.xml.rels` und bei
  * Bedarf einer neuen `Default Extension` in `[Content_Types].xml`) -
  * sowie Breite/Höhe des zugehörigen `<w:drawing>`-Blocks proportional an
- * die tatsächliche Fotogröße angepasst (begrenzt auf die ursprüngliche
- * Platzhalter-Boxgröße, s. PHOTO_BOX_MAX_PX, damit sich die Zeilenhöhe
- * der Tabelle nicht unerwartet ändert). Nicht befüllte Zeilen (weniger
- * als 10 Fotos im Bericht) behalten bewusst das Platzhalterbild - exakt
- * das Verhalten, das auch beim manuellen Ausfüllen der Vorlage in Word
- * entstünde. Die "Beschreibung"-Spalte derselben Zeile zeigt `photo.note`
- * (eigene, pro Foto unabhängige Notiz, siehe PhotoSection.svelte) - ohne
- * eingetragene Notiz bleibt die Spalte bewusst leer (kein Zeitstempel-
- * Fallback mehr, ausdrücklicher Nutzerwunsch).
+ * die tatsächliche Fotogröße angepasst (begrenzt auf die Breite der
+ * Bild-Spalte, s. PHOTO_BOX_MAX_PX). Eingebettet wird ein aus dem Original
+ * neu skaliertes Bild (createExportImage), ersatzweise das Thumbnail. Die
+ * "Beschreibung"-Spalte derselben Zeile zeigt den Foto-Zeitpunkt und darunter
+ * `photo.note` (eigene, pro Foto unabhängige Notiz, siehe PhotoSection.svelte).
  *
  * ZEITEN: Die "Zeiten"-Tabelle war ursprünglich ein eingebettetes
  * Excel-Arbeitsblatt (OLE-Objekt). Auf Nutzerwunsch wurde es in der Vorlage
@@ -172,8 +180,21 @@ const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordproces
 /** Anzahl der in der Vorlage vorhandenen Dokumentations-Zeilen (1.-10.) - weitere legt expandPhotoRows() bei Bedarf an. */
 const TEMPLATE_PHOTO_ROWS = 10;
 
-/** Breite/Höhe der ursprünglichen Platzhalter-Bildbox in der Vorlage (1524000 EMU ÷ 9525 = 160px bei 96dpi) - als Obergrenze für eigene Fotos übernommen. */
-const PHOTO_BOX_MAX_PX = 160;
+/**
+ * Neue Spaltenbreiten der Dokumentations-Tabelle in Twips (Summe wie im
+ * Original 10002): Nr. / Beschreibung / Bild - vorher 2039 / 5010 / 2953.
+ */
+const DOC_TABLE_COLUMNS: ReadonlyArray<readonly [original: number, next: number]> = [
+  [2039, 700],
+  [5010, 3600],
+  [2953, 5702]
+];
+
+/**
+ * Längste Kante eines Fotos im Bericht: 5702 Twips Spaltenbreite minus
+ * Zellränder ≈ 370px bei 96dpi - mit etwas Luft 350px (≈ 9,3 cm).
+ */
+const PHOTO_BOX_MAX_PX = 350;
 const EMU_PER_PX = 9525;
 
 /** Relationship-ID des in der Vorlage 10-fach wiederverwendeten Platzhalterbilds (siehe Dateikommentar oben). */
@@ -210,7 +231,34 @@ function materialRowData(item: MaterialItem): { articleNumber: string; descripti
   };
 }
 
-function buildTemplateData(data: FullReport): Record<string, unknown> {
+const PHOTO_TIME_FORMAT = new Intl.DateTimeFormat('de-DE', {
+  timeZone: 'Europe/Berlin',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
+/**
+ * "Aufnahme: 23.11.2026, 09:14 Uhr" aus dem EXIF-Aufnahmedatum der
+ * Originaldatei, sonst "Upload: …" aus `takenAt` (Zeitpunkt des
+ * Uploads in die App). EXIF-Zeiten sind bereits Ortszeit der Kamera und
+ * werden deshalb ohne Zeitzonen-Umrechnung übernommen.
+ */
+export async function photoTimestampLabel(photo: Photo): Promise<string> {
+  const captured = photo.blob ? await readExifCaptureDateFromBlob(photo.blob) : undefined;
+  if (captured) {
+    const [date, time] = captured.split('T');
+    const [y, m, d] = date.split('-');
+    return `Aufnahme: ${d}.${m}.${y}, ${time.slice(0, 5)} Uhr`;
+  }
+  const uploaded = new Date(photo.takenAt);
+  if (Number.isNaN(uploaded.getTime())) return '';
+  return `Upload: ${PHOTO_TIME_FORMAT.format(uploaded)} Uhr`;
+}
+
+function buildTemplateData(data: FullReport, photoLabels: readonly string[] = []): Record<string, unknown> {
   const { report, materialItems, photos } = data;
   const { contactPerson, contactPhone } = splitContactPersonAndPhone(report);
   const templateData: Record<string, unknown> = {
@@ -266,9 +314,9 @@ function buildTemplateData(data: FullReport): Record<string, unknown> {
   templateData.totalReturnKm = timesheet.totals.returnKm;
   for (let i = 0; i < Math.max(TEMPLATE_PHOTO_ROWS, photos.length); i++) {
     const photo = photos[i];
-    // Nur die eigene Foto-Notiz - ohne eine solche bleibt die Spalte
-    // bewusst leer (kein Zeitstempel-Fallback, ausdrücklicher Nutzerwunsch).
-    templateData[`photo${i}Desc`] = photo ? photo.note ?? '' : '';
+    // Zeitpunkt des Fotos (siehe photoTimestampLabel) + darunter die eigene Notiz.
+    const lines = photo ? [photoLabels[i] ?? '', photo.note ?? ''].filter(Boolean) : [];
+    templateData[`photo${i}Desc`] = lines.join('\n');
   }
   return templateData;
 }
@@ -297,6 +345,54 @@ function fitPhotoBox(width: number | undefined, height: number | undefined): { w
   if (width <= PHOTO_BOX_MAX_PX && height <= PHOTO_BOX_MAX_PX) return { widthPx: width, heightPx: height };
   const scale = PHOTO_BOX_MAX_PX / Math.max(width, height);
   return { widthPx: Math.round(width * scale), heightPx: Math.round(height * scale) };
+}
+
+/**
+ * Bereitet die Dokumentations-Tabelle der Vorlage vor dem Rendern vor (siehe
+ * Dateikommentar "FOTOS - LAYOUT"): entfernt die Bild-Inhaltssteuerungen
+ * (`<w:sdt>` mit `<w:picture/>`, umschließt jeweils die ganze Bild-Zelle -
+ * deren Inhalt bleibt unverändert stehen) und setzt die neuen Spaltenbreiten,
+ * nur innerhalb dieser einen Tabelle.
+ */
+function prepareDocumentationTable(zip: PizZip): void {
+  const file = zip.file('word/document.xml');
+  if (!file) return;
+  let xml = file.asText();
+
+  xml = xml.replace(
+    /<w:sdt><w:sdtPr>(?:(?!<\/w:sdtPr>)[\s\S])*<w:picture\/><\/w:sdtPr>(?:<w:sdtEndPr\/>|<w:sdtEndPr>(?:(?!<\/w:sdtEndPr>)[\s\S])*<\/w:sdtEndPr>)?<w:sdtContent>((?:(?!<\/w:sdtContent>)[\s\S])*)<\/w:sdtContent><\/w:sdt>/g,
+    '$1'
+  );
+
+  const tagIndex = xml.indexOf('{photo0Desc}');
+  if (tagIndex !== -1) {
+    const tableStart = xml.lastIndexOf('<w:tbl>', tagIndex);
+    const tableEnd = xml.indexOf('</w:tbl>', tagIndex);
+    if (tableStart !== -1 && tableEnd !== -1) {
+      let table = xml.slice(tableStart, tableEnd);
+      for (const [original, next] of DOC_TABLE_COLUMNS) {
+        table = table
+          .replaceAll(`<w:gridCol w:w="${original}"/>`, `<w:gridCol w:w="${next}"/>`)
+          .replaceAll(`<w:tcW w:w="${original}" w:type="dxa"/>`, `<w:tcW w:w="${next}" w:type="dxa"/>`);
+      }
+      xml = xml.slice(0, tableStart) + table + xml.slice(tableEnd);
+    }
+  }
+
+  zip.file('word/document.xml', xml);
+}
+
+/** Entfernt den Lauf (`<w:r>`) mit dem Platzhalterbild aus allen nicht mit einem Foto belegten Zeilen. */
+function removeUnusedPlaceholders(documentXml: string): string {
+  let xml = documentXml;
+  let pos: number;
+  while ((pos = xml.indexOf(`r:embed="${PLACEHOLDER_REL_ID}"`)) !== -1) {
+    const runStart = Math.max(xml.lastIndexOf('<w:r>', pos), xml.lastIndexOf('<w:r ', pos));
+    const runEnd = xml.indexOf('</w:r>', pos);
+    if (runStart === -1 || runEnd === -1) break;
+    xml = xml.slice(0, runStart) + xml.slice(runEnd + '</w:r>'.length);
+  }
+  return xml;
 }
 
 /**
@@ -331,8 +427,6 @@ function expandPhotoRows(zip: PizZip, photoCount: number): void {
 
 /** Siehe Dateikommentar oben ("FOTOS - EIGENER WEG, KEIN BILD-MODUL") - mutiert `zip` direkt. */
 async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
-  if (photos.length === 0) return;
-
   const documentFile = zip.file('word/document.xml');
   const relsFile = zip.file('word/_rels/document.xml.rels');
   const contentTypesFile = zip.file('[Content_Types].xml');
@@ -355,17 +449,20 @@ async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
   for (let i = count - 1; i >= 0; i--) {
     const photo = photos[i];
     const pos = positions[i];
-    const extension = extensionForMimeType(photo.mimeType);
+    // Größeres Exportbild aus dem Original, sonst (z.B. ohne Canvas) das Thumbnail.
+    const image = (photo.blob ? await createExportImage(photo.blob) : undefined) ?? photo.thumbnailBlob;
+    const mimeType = image.type || 'image/jpeg';
+    const extension = extensionForMimeType(mimeType);
     const relId = `rIdPhoto${i}`;
     const mediaName = `photo${i}.${extension}`;
-    const bytes = new Uint8Array(await photo.thumbnailBlob.arrayBuffer());
+    const bytes = new Uint8Array(await image.arrayBuffer());
 
     zip.file(`word/media/${mediaName}`, bytes, { binary: true });
     relsXml = relsXml.replace(
       '</Relationships>',
       `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/></Relationships>`
     );
-    contentTypesXml = ensureContentType(contentTypesXml, extension, photo.mimeType);
+    contentTypesXml = ensureContentType(contentTypesXml, extension, mimeType);
 
     documentXml =
       documentXml.slice(0, pos) + documentXml.slice(pos).replace(`r:embed="${PLACEHOLDER_REL_ID}"`, `r:embed="${relId}"`);
@@ -381,6 +478,7 @@ async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
     documentXml = documentXml.slice(0, drawingStart) + drawingBlock + documentXml.slice(drawingEnd);
   }
 
+  documentXml = removeUnusedPlaceholders(documentXml);
   zip.file('word/document.xml', documentXml);
   zip.file('word/_rels/document.xml.rels', relsXml);
   zip.file('[Content_Types].xml', contentTypesXml);
@@ -482,9 +580,11 @@ export async function buildReportDocx(data: FullReport, templateBytes?: ArrayBuf
 
   const templateBuffer: ArrayBuffer = templateBytes ?? (await fetch(templateUrl).then((res) => res.arrayBuffer()));
   const zip = new PizZip(templateBuffer);
+  prepareDocumentationTable(zip);
   expandPhotoRows(zip, exportData.photos.length);
+  const photoLabels = await Promise.all(exportData.photos.map(photoTimestampLabel));
   const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-  await doc.renderAsync(buildTemplateData(exportData));
+  await doc.renderAsync(buildTemplateData(exportData, photoLabels));
 
   const outZip = doc.getZip();
   await injectPhotos(outZip, exportData.photos);

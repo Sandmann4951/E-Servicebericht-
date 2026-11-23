@@ -43,3 +43,37 @@ export async function createThumbnail(file: Blob): Promise<ThumbnailResult> {
     bitmap.close();
   }
 }
+
+const MAX_EXPORT_EDGE = 1200;
+const EXPORT_QUALITY = 0.8;
+
+/**
+ * Bild für den Word-Export: aus dem Original (`photo.blob`) neu skaliert auf
+ * max. 1200px Kantenlänge - das 400px-Thumbnail wäre in der vergrößerten
+ * Foto-Spalte des Berichts (gedruckt ca. 9 cm breit) sichtbar unscharf.
+ * Gibt undefined zurück, wenn das im aktuellen Umfeld nicht geht (kein
+ * Canvas, z.B. in Tests, oder ein Format, das der Browser nicht dekodiert) -
+ * der Aufrufer nimmt dann das Thumbnail.
+ */
+export async function createExportImage(file: Blob): Promise<Blob | undefined> {
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return undefined;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    try {
+      const scale = Math.min(1, MAX_EXPORT_EDGE / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return undefined;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      return await new Promise<Blob | undefined>((resolve) =>
+        canvas.toBlob((blob) => resolve(blob ?? undefined), 'image/jpeg', EXPORT_QUALITY)
+      );
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
