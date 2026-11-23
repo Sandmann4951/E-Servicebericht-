@@ -4,7 +4,13 @@
   import { createThumbnail } from '../utils/image';
   import Icon from './Icon.svelte';
 
-  let { reportId, locked = false, onChanged }: { reportId: string; locked?: boolean; onChanged: () => void } = $props();
+  let {
+    reportId,
+    locked = false,
+    // Ändert sich nach einem Export - nur zum Neuladen der "berichtet"-Kennzeichnung.
+    listsVersion = 0,
+    onChanged
+  }: { reportId: string; locked?: boolean; listsVersion?: number; onChanged: () => void } = $props();
 
   let photos = $state<Photo[]>([]);
   let loading = $state(true);
@@ -73,6 +79,7 @@
 
   $effect(() => {
     reportId;
+    listsVersion;
     load();
     return () => revokeAllThumbnails();
   });
@@ -188,7 +195,7 @@
             <img src={thumbnailUrls[photo.id]} alt="Einsatzfoto" loading="lazy" />
           </button>
           <label class="note-label">
-            Notiz zu diesem Foto
+            <span>Notiz zu diesem Foto{#if photo.reportedAt}<span class="reported-tag" title="Bereits in einem Export enthalten">berichtet</span>{/if}</span>
             <textarea
               rows="2"
               bind:value={noteDrafts[photo.id]}
@@ -305,6 +312,16 @@
   .note-label {
     min-width: 0;
     font-size: 0.95em;
+    color: var(--color-text-muted);
+  }
+
+  .reported-tag {
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
     color: var(--color-text-muted);
   }
 

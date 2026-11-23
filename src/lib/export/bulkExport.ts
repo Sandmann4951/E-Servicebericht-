@@ -1,4 +1,6 @@
-import { listReports, markReportExported } from '../db/reports';
+import { listReports } from '../db/reports';
+import { markExportedContent } from './markExported';
+import type { FullReport } from './getFullReport';
 import type { ServiceReport } from '../db/types';
 import { startOfWeekISO, todayISODate } from '../utils/date';
 
@@ -124,6 +126,7 @@ export async function bulkExportReports(
   ]);
 
   const files: File[] = [];
+  const exportedData = new Map<string, FullReport>();
   const failed: ServiceReport[] = [];
   const usedNames = new Set<string>();
 
@@ -136,6 +139,7 @@ export async function bulkExportReports(
       const fileName = uniqueFileName(suggestedFileName(report), usedNames);
       const mimeType = blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       files.push(new File([blob], fileName, { type: mimeType }));
+      exportedData.set(report.id, data);
     } catch (err) {
       console.error('Bericht-Export fehlgeschlagen', report.id, err);
       failed.push(report);
@@ -179,7 +183,12 @@ export async function bulkExportReports(
 
   const failedIds = new Set(failed.map((r) => r.id));
   const exportedReports = reports.filter((r) => !failedIds.has(r.id));
-  await Promise.all(exportedReports.map((r) => markReportExported(r.id)));
+  // Sammel-Export enthält immer alles - danach gilt auch alles als berichtet,
+  // damit ein späterer Export "Nur Neues" nicht wieder von vorne anfängt.
+  for (const r of exportedReports) {
+    const data = exportedData.get(r.id);
+    if (data) await markExportedContent(r.id, data, data);
+  }
 
   return { exportedCount: exportedReports.length, failed };
 }

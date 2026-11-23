@@ -5,13 +5,13 @@
     finalizeReport,
     getReport,
     listReportsByProjectNumber,
-    markReportExported,
     setReportSignature,
     unlockReport,
     updateReport
   } from '../lib/db/reports';
-  import { getActiveTimeEntry, listTimeEntries, markTimeEntriesReported } from '../lib/db/timeEntries';
-  import { listMaterialItems, markMaterialItemsReported } from '../lib/db/materialItems';
+  import { getActiveTimeEntry, listTimeEntries } from '../lib/db/timeEntries';
+  import { listMaterialItems } from '../lib/db/materialItems';
+  import type { FullReport } from '../lib/export/getFullReport';
   import { syncPerformedWorkFromNotes } from '../lib/db/performedWorkSync';
   import { switchToIdle } from '../lib/clockActions';
   import type { OrderType, PlantStatus, ReportStatus, ServiceReport } from '../lib/db/types';
@@ -687,17 +687,13 @@
   }
 
   /**
-   * Markiert nach einem erfolgreichen Export genau die Zeiten/Material, die
-   * tatsächlich in `exportedData` enthalten waren (bei "Nur Neues" also nur
-   * der vorher offene Teil - siehe exportScope.ts) als berichtet, sowie den
-   * Bericht selbst als exportiert. `listsVersion++` stößt TimeEntrySection/
-   * MaterialSection zum Neuladen an, damit die "berichtet"-Kennzeichnung
-   * sofort sichtbar wird, ohne dass der Nutzer den Tab wechseln muss.
+   * Markiert nach einem erfolgreichen Export das Exportierte als berichtet
+   * (siehe export/markExported.ts). `listsVersion++` stößt die Reiter zum
+   * Neuladen an, damit die "berichtet"-Kennzeichnung sofort sichtbar wird.
    */
-  async function markExportedScope(exportedReportId: string, exportedData: { timeEntries: { id: string }[]; materialItems: { id: string }[] }): Promise<void> {
-    await markTimeEntriesReported(exportedData.timeEntries.map((entry) => entry.id));
-    await markMaterialItemsReported(exportedData.materialItems.map((item) => item.id));
-    await markReportExported(exportedReportId);
+  async function markExportedScope(exportedReportId: string, exportedData: FullReport, fullData: FullReport): Promise<void> {
+    const { markExportedContent } = await import('../lib/export/markExported');
+    await markExportedContent(exportedReportId, exportedData, fullData);
     exportedAt = new Date().toISOString();
     listsVersion++;
   }
@@ -761,7 +757,7 @@
       if (navigator.canShare?.({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: fileName });
-          await markExportedScope(reportId, data);
+          await markExportedScope(reportId, data, fullData);
           return;
         } catch (shareErr) {
           // Ein vom Nutzer abgebrochener Share-Dialog ist kein Fehler - dort
@@ -780,7 +776,7 @@
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      await markExportedScope(reportId, data);
+      await markExportedScope(reportId, data, fullData);
     } catch (err) {
       exportError = true;
       console.error('Export fehlgeschlagen', err);
@@ -1320,7 +1316,7 @@
         {:else if activeTab === 'material' && reportId}
           <MaterialSection {reportId} {locked} {listsVersion} onChanged={refreshSummary} />
         {:else if activeTab === 'fotos' && reportId}
-          <PhotoSection {reportId} {locked} onChanged={refreshSummary} />
+          <PhotoSection {reportId} {locked} {listsVersion} onChanged={refreshSummary} />
         {:else if activeTab === 'unterschrift' && reportId}
           <SignatureSection
             {signatureBlob}

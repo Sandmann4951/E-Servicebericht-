@@ -469,14 +469,31 @@ describe('buildReportDocx', () => {
     });
   });
 
-  it('begrenzt eingebettete Fotos auf die 10 Zeilen der Vorlage, ohne zu werfen', async () => {
-    const manyPhotos = Array.from({ length: 12 }, (_, i) => fakePhoto({ id: `p${i}`, takenAt: `2026-08-10T0${i % 9}:00:00.000Z` }));
+  it('legt bei mehr als 10 Fotos weitere nummerierte Zeilen an und bettet jedes Foto ein', async () => {
+    const manyPhotos = Array.from({ length: 13 }, (_, i) =>
+      fakePhoto({ id: `p${i}`, takenAt: `2026-08-10T${String(i).padStart(2, '0')}:00:00.000Z`, note: `Notiz ${i + 1}` })
+    );
     const blob = await build(fakeFullReport({ photos: manyPhotos }));
     const zip = await JSZip.loadAsync(await blob.arrayBuffer());
     const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith('word/media/photo'));
-    expect(mediaFiles).toHaveLength(10);
+    expect(mediaFiles).toHaveLength(13);
     const xml = await zip.file('word/document.xml')!.async('text');
     expect(xml.match(/r:embed="rId22"/g)).toBeNull();
+    for (let i = 0; i < 13; i++) expect(xml).toContain(`r:embed="rIdPhoto${i}"`);
+    expect(xml).toContain('Notiz 13');
+    expect(xml).toContain('<w:t>11</w:t>');
+    expect(xml).toContain('<w:t>13</w:t>');
+    expect(xml).not.toContain('<w:t>14</w:t>');
+    expect(xml).not.toMatch(/\{photo\d+Desc\}/);
+    const docPrIds = [...xml.matchAll(/<wp:docPr id="(\d+)"/g)].map((m) => m[1]);
+    expect(new Set(docPrIds).size).toBe(docPrIds.length);
+  });
+
+  it('lässt die Vorlage bei höchstens 10 Fotos unverändert bei 10 Zeilen', async () => {
+    const blob = await build(fakeFullReport({ photos: [fakePhoto()] }));
+    const xml = await documentXmlOf(blob);
+    expect(xml).not.toContain('<w:t>11</w:t>');
+    expect(xml.match(/r:embed="rId22"/g)).toHaveLength(9);
   });
 
   it('traegt bei einer Kunden-Unterschrift den gedruckten Namen UND das tatsaechliche Unterschriftsbild ein (neue DrawingML-Einfuegung, da die Vorlage dafuer urspruenglich keinen Platzhalter vorsieht)', async () => {

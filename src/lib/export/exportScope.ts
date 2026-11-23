@@ -1,4 +1,4 @@
-import type { MaterialItem, ServiceReport, TimeEntry } from '../db/types';
+import type { MaterialItem, Photo, ServiceReport, TimeEntry } from '../db/types';
 import type { FullReport } from './getFullReport';
 
 /**
@@ -35,9 +35,55 @@ export function isMaterialItemFullyReported(item: Pick<MaterialItem, 'quantity' 
   return remainingMaterialQuantity(item) <= 0;
 }
 
-/** true, wenn mindestens ein Zeiteintrag oder ein Material-Rest noch nicht berichtet ist - wenn false, hat "Nur Neues" nichts zu exportieren. */
-export function hasUnreportedContent(data: Pick<FullReport, 'timeEntries' | 'materialItems'>): boolean {
-  return data.timeEntries.some((entry) => !isTimeEntryReported(entry)) || data.materialItems.some((item) => !isMaterialItemFullyReported(item));
+/**
+ * Ist dieses Foto schon in einem Export gewesen? Fotos werden erst seit
+ * Kurzem einzeln markiert (Photo.reportedAt). Bei einem Bericht, der zuvor
+ * schon exportiert wurde, ohne dass dabei ein Foto markiert wurde, gelten
+ * alle bis zum letzten Export hochgeladenen Fotos als berichtet.
+ */
+export function isPhotoReported(photo: Pick<Photo, 'reportedAt' | 'takenAt'>, report: Pick<ServiceReport, 'exportedAt'>, allPhotos: readonly Pick<Photo, 'reportedAt'>[]): boolean {
+  if (photo.reportedAt) return true;
+  if (!report.exportedAt || allPhotos.some((other) => other.reportedAt)) return false;
+  return photo.takenAt <= report.exportedAt;
+}
+
+/**
+ * "Durchgeführte Arbeiten" ohne die Zeilen, die schon berichtet wurden: was
+ * beim letzten Export schon dastand (`reportedPerformedWork`), und die
+ * Zeilen bereits berichteter Zeitabschnitte (TimeEntry.performedWorkLine) -
+ * letzteres greift auch bei Berichten, die vor Einführung von
+ * `reportedPerformedWork` exportiert wurden.
+ */
+export function unreportedPerformedWork(
+  report: Pick<ServiceReport, 'performedWork' | 'reportedPerformedWork'>,
+  timeEntries: readonly Pick<TimeEntry, 'reportedAt' | 'performedWorkLine'>[]
+): string {
+  const done = new Set(
+    (report.reportedPerformedWork ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+  );
+  for (const entry of timeEntries) {
+    if (isTimeEntryReported(entry) && entry.performedWorkLine) done.add(entry.performedWorkLine.trim());
+  }
+  return (report.performedWork ?? '')
+    .split('\n')
+    .filter((line) => line.trim() && !done.has(line.trim()))
+    .join('\n');
+}
+
+/** true, wenn es seit dem letzten Export irgendetwas Neues gibt - wenn false, hat "Nur Neues" nichts zu exportieren. */
+export function hasUnreportedContent(
+  data: Pick<FullReport, 'timeEntries' | 'materialItems'> & Partial<Pick<FullReport, 'photos' | 'report'>>
+): boolean {
+  const photos = (data.photos ?? []).filter((photo) => !photo.excludeFromReport);
+  return (
+    data.timeEntries.some((entry) => !isTimeEntryReported(entry)) ||
+    data.materialItems.some((item) => !isMaterialItemFullyReported(item)) ||
+    (!!data.report && photos.some((photo) => !isPhotoReported(photo, data.report!, data.photos!))) ||
+    (!!data.report && unreportedPerformedWork(data.report, data.timeEntries) !== '')
+  );
 }
 
 /**
@@ -55,5 +101,7 @@ export function filterToUnreportedOnly(data: FullReport): FullReport {
   const materialItems = data.materialItems
     .filter((item) => !isMaterialItemFullyReported(item))
     .map((item) => ({ ...item, quantity: remainingMaterialQuantity(item) }));
-  return { ...data, timeEntries, materialItems };
+  const photos = data.photos.filter((photo) => !isPhotoReported(photo, data.report, data.photos));
+  const performedWork = unreportedPerformedWork(data.report, data.timeEntries) || undefined;
+  return { ...data, report: { ...data.report, performedWork }, timeEntries, materialItems, photos };
 }

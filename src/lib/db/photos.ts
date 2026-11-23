@@ -71,6 +71,22 @@ export async function updatePhoto(
   return photo;
 }
 
+/** Markiert die Fotos nach einem Export als berichtet (siehe Photo.reportedAt) - nicht (mehr) vorhandene IDs werden übersprungen. */
+export async function markPhotosReported(ids: readonly ID[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDB();
+  const tx = db.transaction('photos', 'readwrite');
+  const store = tx.objectStore('photos');
+  const now = new Date().toISOString();
+  for (const id of ids) {
+    const photo = await store.get(id);
+    if (!photo) continue;
+    photo.reportedAt = now;
+    await store.put(photo);
+  }
+  await tx.done;
+}
+
 export async function deletePhoto(id: ID): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(ALL_STORES, 'readwrite');

@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   filterToUnreportedOnly,
   hasUnreportedContent,
+  isPhotoReported,
+  unreportedPerformedWork,
   isMaterialItemFullyReported,
   isTimeEntryReported,
   remainingMaterialQuantity,
   reportNeverExported
 } from '../../lib/export/exportScope';
 import type { FullReport } from '../../lib/export/getFullReport';
-import type { MaterialItem, ServiceReport, TimeEntry } from '../../lib/db/types';
+import type { MaterialItem, Photo, ServiceReport, TimeEntry } from '../../lib/db/types';
 
 function makeTimeEntry(overrides: Partial<TimeEntry> = {}): TimeEntry {
   return {
@@ -158,5 +160,72 @@ describe('exportScope - filterToUnreportedOnly', () => {
 
     filterToUnreportedOnly(data);
     expect(partial.quantity).toBe(10);
+  });
+});
+
+function makePhoto(overrides: Partial<Photo> = {}): Photo {
+  return {
+    id: overrides.id ?? 'photo-1',
+    reportId: 'report-1',
+    blob: new Blob([]),
+    thumbnailBlob: new Blob([]),
+    mimeType: 'image/jpeg',
+    sizeBytes: 0,
+    takenAt: '2026-08-10T09:00:00.000Z',
+    ...overrides
+  };
+}
+
+describe('exportScope - zweiter Einsatz: Fotos und durchgeführte Arbeiten', () => {
+  const FIRST = '10.08.2026, 08:00–12:00: Zählerschrank gesetzt';
+  const SECOND = '20.08.2026, 08:00–11:00: Wallbox angeschlossen';
+
+  it('nimmt bei "Nur Neues" nur die Arbeiten des neuen Einsatzes (Zeile eines berichteten Abschnitts fällt weg)', () => {
+    const data = makeFullReport({
+      report: { performedWork: `${FIRST}\n${SECOND}`, exportedAt: '2026-08-10T13:00:00.000Z' } as ServiceReport,
+      timeEntries: [
+        makeTimeEntry({ id: 't1', reportedAt: '2026-08-10T13:00:00.000Z', performedWorkLine: FIRST }),
+        makeTimeEntry({ id: 't2', date: '2026-08-20', performedWorkLine: SECOND })
+      ]
+    });
+    expect(filterToUnreportedOnly(data).report.performedWork).toBe(SECOND);
+  });
+
+  it('lässt auch von Hand geschriebene Zeilen weg, die beim letzten Export schon dastanden', () => {
+    expect(
+      unreportedPerformedWork({ performedWork: 'Kunde eingewiesen\nNeuer Zähler bestellt', reportedPerformedWork: 'Kunde eingewiesen' }, [])
+    ).toBe('Neuer Zähler bestellt');
+  });
+
+  it('nimmt nur die seitdem hinzugekommenen Fotos', () => {
+    const data = makeFullReport({
+      report: { exportedAt: '2026-08-10T13:00:00.000Z' } as ServiceReport,
+      photos: [makePhoto({ id: 'alt', reportedAt: '2026-08-10T13:00:00.000Z' }), makePhoto({ id: 'neu', takenAt: '2026-08-20T09:00:00.000Z' })]
+    });
+    expect(filterToUnreportedOnly(data).photos.map((p) => p.id)).toEqual(['neu']);
+  });
+
+  it('gilt bei vor der Foto-Markierung exportierten Berichten jedes bis zum Export hochgeladene Foto als berichtet', () => {
+    const report = { exportedAt: '2026-08-10T13:00:00.000Z' };
+    const old = makePhoto({ takenAt: '2026-08-10T09:00:00.000Z' });
+    const fresh = makePhoto({ takenAt: '2026-08-20T09:00:00.000Z' });
+    expect(isPhotoReported(old, report, [old, fresh])).toBe(true);
+    expect(isPhotoReported(fresh, report, [old, fresh])).toBe(false);
+    // Sobald Fotos einzeln markiert werden, zählt nur noch die Markierung.
+    const marked = makePhoto({ reportedAt: '2026-08-15T09:00:00.000Z' });
+    expect(isPhotoReported(old, report, [old, marked])).toBe(false);
+  });
+
+  it('erkennt neue Fotos und neue Arbeiten als "es gibt Neues", auch ohne neue Zeiten oder neues Material', () => {
+    const base = {
+      timeEntries: [makeTimeEntry({ reportedAt: '2026-08-10T13:00:00.000Z' })],
+      materialItems: []
+    };
+    const report = makeFullReport({ report: { exportedAt: '2026-08-10T13:00:00.000Z', reportedPerformedWork: 'A' } as ServiceReport }).report;
+    expect(hasUnreportedContent({ ...base, report: { ...report, performedWork: 'A' }, photos: [] })).toBe(false);
+    expect(hasUnreportedContent({ ...base, report: { ...report, performedWork: 'A\nB' }, photos: [] })).toBe(true);
+    expect(hasUnreportedContent({ ...base, report, photos: [makePhoto({ takenAt: '2026-08-20T09:00:00.000Z' })] })).toBe(true);
+    // Ausgeschlossene Fotos zählen nicht.
+    expect(hasUnreportedContent({ ...base, report, photos: [makePhoto({ takenAt: '2026-08-20T09:00:00.000Z', excludeFromReport: true })] })).toBe(false);
   });
 });

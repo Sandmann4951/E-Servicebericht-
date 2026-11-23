@@ -157,6 +157,12 @@ export interface ServiceReport {
 
   /** Zeitpunkt des letzten erfolgreichen Word-Exports/Downloads/Teilens - für die "bereits eingereicht?"-Anzeige in der Übersicht. */
   exportedAt?: ISODateTime;
+  /**
+   * Stand von `performedWork` beim letzten Export - Grundlage dafür, dass der
+   * Export "Nur Neues" nur die seitdem hinzugekommenen Zeilen enthält (siehe
+   * export/exportScope.ts unreportedPerformedWork()). Rein intern gesetzt.
+   */
+  reportedPerformedWork?: string;
 
   /**
    * Anzahl UNTERSCHIEDLICHER Kalendertage mit mindestens einem Zeiteintrag -
@@ -395,6 +401,8 @@ export interface Photo {
    * = wie bisher ganz normal mit exportieren.
    */
   excludeFromReport?: boolean;
+  /** Gesetzt, sobald das Foto in einem Word-Export enthalten war - wie TimeEntry.reportedAt. */
+  reportedAt?: ISODateTime;
 }
 
 export interface ServiceBerichtDB extends DBSchema {

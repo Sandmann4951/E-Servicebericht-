@@ -58,8 +58,8 @@ import { buildTimesheetRows } from './timesheetRows';
  * gespeicherten Daten selbst zu verändern.
  *
  * FOTOS - EIGENER WEG, KEIN BILD-MODUL: Jede der 10 nummerierten
- * Dokumentations-Zeilen (1.-10., harte Obergrenze aus dem
- * Vorlagen-Layout) hat in der Originaldatei bereits eine eigene, vom
+ * Dokumentations-Zeilen (1.-10.; bei mehr Fotos werden weitere Zeilen nach
+ * dem Muster der 10. angehängt, siehe expandPhotoRows()) hat in der Originaldatei bereits eine eigene, vom
  * Vorlagen-Autor angelegte Word-"Bild-Inhaltssteuerung" (`<w:sdt>` mit
  * Platzhalterbild, alle 10 über dieselbe Relationship-ID `rId22`
  * verknüpft) als dafür vorgesehenen Platz - das ist eleganter als ein
@@ -72,7 +72,7 @@ import { buildTimesheetRows } from './timesheetRows';
  * gebaut) und hätte zusätzlich eine stark veraltete, mehrfach kritisch
  * verwundbare `xmldom`-Abhängigkeit mitgebracht. Deshalb übernimmt
  * `injectPhotos()` unten das Einfügen von Hand: nach dem reinen
- * Text-Rendering werden die ersten `photos.length` (max. 10) Vorkommen
+ * Text-Rendering werden die ersten `photos.length` Vorkommen
  * von `r:embed="rId22"` in Dokumentreihenfolge (= Zeile 1, 2, 3, ...)
  * durch eine neue, pro Foto eigene Relationship ersetzt (inkl. Foto-Datei
  * in `word/media/`, Eintrag in `word/_rels/document.xml.rels` und bei
@@ -169,8 +169,8 @@ import { buildTimesheetRows } from './timesheetRows';
 
 const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-/** Harte Obergrenze aus dem Vorlagen-Layout: genau 10 nummerierte Dokumentations-Zeilen (1.-10.), nicht änderbar ohne das Layout selbst zu verändern. */
-const MAX_PHOTOS = 10;
+/** Anzahl der in der Vorlage vorhandenen Dokumentations-Zeilen (1.-10.) - weitere legt expandPhotoRows() bei Bedarf an. */
+const TEMPLATE_PHOTO_ROWS = 10;
 
 /** Breite/Höhe der ursprünglichen Platzhalter-Bildbox in der Vorlage (1524000 EMU ÷ 9525 = 160px bei 96dpi) - als Obergrenze für eigene Fotos übernommen. */
 const PHOTO_BOX_MAX_PX = 160;
@@ -264,7 +264,7 @@ function buildTemplateData(data: FullReport): Record<string, unknown> {
   templateData.totalOvertime = timesheet.totals.overtime;
   templateData.totalReturnTravel = timesheet.totals.returnTravel;
   templateData.totalReturnKm = timesheet.totals.returnKm;
-  for (let i = 0; i < MAX_PHOTOS; i++) {
+  for (let i = 0; i < Math.max(TEMPLATE_PHOTO_ROWS, photos.length); i++) {
     const photo = photos[i];
     // Nur die eigene Foto-Notiz - ohne eine solche bleibt die Spalte
     // bewusst leer (kein Zeitstempel-Fallback, ausdrücklicher Nutzerwunsch).
@@ -299,6 +299,36 @@ function fitPhotoBox(width: number | undefined, height: number | undefined): { w
   return { widthPx: Math.round(width * scale), heightPx: Math.round(height * scale) };
 }
 
+/**
+ * Hängt hinter der letzten Dokumentations-Zeile (10.) so viele Kopien an,
+ * dass jedes Foto eine eigene Zeile bekommt - mit fortlaufender Nummer und
+ * eigenem Beschreibungs-Platzhalter. Läuft VOR dem Text-Rendering auf der
+ * Vorlage selbst. Die Absatz-IDs (w14:paraId/textId) werden in den Kopien
+ * entfernt und die Bild-ID neu vergeben, beides muss im Dokument eindeutig sein.
+ */
+function expandPhotoRows(zip: PizZip, photoCount: number): void {
+  if (photoCount <= TEMPLATE_PHOTO_ROWS) return;
+  const file = zip.file('word/document.xml');
+  if (!file) return;
+  const xml = file.asText();
+  const lastTag = `{photo${TEMPLATE_PHOTO_ROWS - 1}Desc}`;
+  const tagIndex = xml.indexOf(lastTag);
+  if (tagIndex === -1) return;
+  const rowStart = Math.max(xml.lastIndexOf('<w:tr ', tagIndex), xml.lastIndexOf('<w:tr>', tagIndex));
+  const rowEnd = xml.indexOf('</w:tr>', tagIndex) + '</w:tr>'.length;
+  if (rowStart === -1 || rowEnd < tagIndex) return;
+  const template = xml.slice(rowStart, rowEnd).replace(/ w14:(?:paraId|textId)="[^"]*"/g, '');
+
+  let extraRows = '';
+  for (let i = TEMPLATE_PHOTO_ROWS; i < photoCount; i++) {
+    extraRows += template
+      .replace(`<w:t>${TEMPLATE_PHOTO_ROWS}</w:t>`, `<w:t>${i + 1}</w:t>`)
+      .replace(lastTag, `{photo${i}Desc}`)
+      .replace(/<wp:docPr id="\d+"/, `<wp:docPr id="${3000000 + i}"`);
+  }
+  zip.file('word/document.xml', xml.slice(0, rowEnd) + extraRows + xml.slice(rowEnd));
+}
+
 /** Siehe Dateikommentar oben ("FOTOS - EIGENER WEG, KEIN BILD-MODUL") - mutiert `zip` direkt. */
 async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
   if (photos.length === 0) return;
@@ -317,7 +347,7 @@ async function injectPhotos(zip: PizZip, photos: Photo[]): Promise<void> {
   let match: RegExpExecArray | null;
   while ((match = embedPattern.exec(documentXml))) positions.push(match.index);
 
-  const count = Math.min(photos.length, positions.length, MAX_PHOTOS);
+  const count = Math.min(photos.length, positions.length);
 
   // In ABSTEIGENDER Zeilen-Reihenfolge ersetzen: jede Ersetzung ändert die
   // Textlänge, vorab ermittelte `positions` für noch nicht bearbeitete
@@ -452,11 +482,12 @@ export async function buildReportDocx(data: FullReport, templateBytes?: ArrayBuf
 
   const templateBuffer: ArrayBuffer = templateBytes ?? (await fetch(templateUrl).then((res) => res.arrayBuffer()));
   const zip = new PizZip(templateBuffer);
+  expandPhotoRows(zip, exportData.photos.length);
   const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
   await doc.renderAsync(buildTemplateData(exportData));
 
   const outZip = doc.getZip();
-  await injectPhotos(outZip, exportData.photos.slice(0, MAX_PHOTOS));
+  await injectPhotos(outZip, exportData.photos);
   await injectSignature(outZip, exportData.report);
 
   return outZip.generate({ type: 'blob', mimeType: DOCX_MIME_TYPE });

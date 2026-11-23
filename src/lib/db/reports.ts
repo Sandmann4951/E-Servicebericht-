@@ -250,10 +250,12 @@ export async function unlockReport(id: ID): Promise<ServiceReport | undefined> {
 }
 
 /** Merkt den Zeitpunkt des letzten erfolgreichen Word-Exports/Downloads/Teilens vor. */
-export async function markReportExported(id: ID): Promise<ServiceReport | undefined> {
+/** `reportedPerformedWork`: der Stand von "Durchgeführte Arbeiten", der mit diesem Export als berichtet gilt (siehe ServiceReport.reportedPerformedWork). */
+export async function markReportExported(id: ID, reportedPerformedWork?: string): Promise<ServiceReport | undefined> {
   return withReportTransaction(id, (report) => {
     const now = new Date().toISOString();
     report.exportedAt = now;
+    if (reportedPerformedWork !== undefined) report.reportedPerformedWork = reportedPerformedWork;
     report.updatedAt = now;
   });
 }
